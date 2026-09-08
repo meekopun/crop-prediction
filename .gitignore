@@ -3,6 +3,15 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# geojson files
+*.geojson
+
+# macOS
+.DS_Store
+
+# Exceeds GitHub's 100 MB file limit; distribute out of band
+Crop Classification Prediction/package/data/sentinel2_pixel_samples.csv
+
 # C extensions
 *.so
 

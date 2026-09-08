@@ -1,0 +1,74 @@
+{
+  "project_name": "Crop Classification Batch Pipeline",
+  "label_source": {
+    "preferred": "local_aafc_raster",
+    "fallback": "gee_aafc_only",
+    "gee_dataset": "AAFC/ACI",
+    "local_raster_pattern": "",
+    "notes": "Only labels may come from GEE. All predictor features should come from Sentinel-2 APIs."
+  },
+  "sentinel2_source": {
+    "preferred_api": "copernicus_data_space",
+    "alternative_api": "sentinel_hub_process_api",
+    "product_level": "L2A",
+    "stac_search_endpoint": "https://stac.dataspace.copernicus.eu/v1/search",
+    "stac_root_endpoint": "https://stac.dataspace.copernicus.eu/v1/",
+    "odata_products_endpoint": "https://catalogue.dataspace.copernicus.eu/odata/v1/Products",
+    "odata_download_base": "https://download.dataspace.copernicus.eu/odata/v1/Products",
+    "oauth_token_url": "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+    "oauth_client_id": "cdse-public",
+    "notes": "Use Copernicus Data Space STAC for discovery and OData for downloads. Derive spectral/phenology features locally from Sentinel-2 L2A."
+  },
+  "geojson": {
+    "path": "../quarter_sections.geojson",
+    "exclude_road_allowances": true
+  },
+  "crops_of_interest": [
+    "Barley",
+    "Canola and Rapeseed",
+    "Peas",
+    "Spring Wheat"
+  ],
+  "feature_policy": {
+    "include": [
+      "visible_bands",
+      "red_edge_bands",
+      "nir",
+      "swir",
+      "color_ratios",
+      "flowering_indices",
+      "phenology_timing",
+      "time_window_summaries"
+    ],
+    "exclude": [
+      "soil_moisture",
+      "weather",
+      "static_soil",
+      "terrain"
+    ]
+  },
+  "season": {
+    "start_month": 4,
+    "start_day": 1,
+    "end_month": 10,
+    "end_day": 1,
+    "aggregation_interval": "P7D",
+    "resolution_m": 10,
+    "max_cloud_coverage": 60
+  },
+  "batching": {
+    "batch_count": 40,
+    "assignees": [
+      "person_a",
+      "person_b"
+    ]
+  },
+  "paths": {
+    "batches_csv": "quarter_section_batches.csv",
+    "tracker_csv": "quarter_section_tracker.csv",
+    "batch_geojson_dir": "batch_geojson",
+    "scene_manifest_dir": "scene_manifests",
+    "batch_feature_dir": "batch_features",
+    "model_output_dir": "model_outputs"
+  }
+}
