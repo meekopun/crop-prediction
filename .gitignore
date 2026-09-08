@@ -9,8 +9,11 @@ __pycache__/
 # macOS
 .DS_Store
 
-# Exceeds GitHub's 100 MB file limit; distribute out of band
-Crop Classification Prediction/package/data/sentinel2_pixel_samples.csv
+# Downloaded and generated data stays local. sentinel2_pixel_samples.csv in
+# particular exceeds GitHub's 100 MB file limit.
+**/data/*
+!**/data/README.md
+!**/data/training_table.csv
 
 # C extensions
 *.so
