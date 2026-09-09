@@ -83,5 +83,5 @@ The handoff includes the code and exact input names for those files so they can 
 
 - `benchmark` requires optional ML dependencies from `pip install -e '.[ml]'`.
 - The package can be run either after installation or via `PYTHONPATH=src`.
-- Upstream extraction and preprocessing require additional dependencies listed in `requirements-upstream.txt`.
+- Upstream extraction and preprocessing require the geospatial dependencies listed in `requirements.txt`.
 - External services used by the upstream workflows include Google Earth Engine and Copernicus Data Space.

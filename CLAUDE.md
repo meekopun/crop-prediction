@@ -105,8 +105,7 @@ byte-identical to the copies at `Crop Classification Prediction/`. Edit both.
 ## Crop Yield (`Crop Yield Prediction/basic_pipeline/`)
 
 ```bash
-pip install -r requirements-upstream.txt   # geospatial + GEE work
-pip install -r requirements-ml.txt         # pandas/sklearn/xgboost modeling
+pip install -r requirements.txt            # geospatial + GEE and modeling deps
 python -m unittest discover tests          # or: python -m unittest tests.test_cli
 ```
 

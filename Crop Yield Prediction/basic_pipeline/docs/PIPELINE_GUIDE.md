@@ -190,6 +190,8 @@ Files:
 
 These scripts operate on already-prepared feature tables and are downstream of the extraction/preprocessing steps above.
 
-## Dependency split
+## Dependencies
 
-Use `requirements-upstream.txt` when working on extraction or preprocessing. The packaged CLI dependencies in `pyproject.toml` are not sufficient for the geospatial and batch workflows.
+`requirements.txt` covers every workflow in this bundle: extraction, preprocessing, and modeling. The packaged CLI dependencies in `pyproject.toml` are not sufficient for the geospatial and batch workflows.
+
+The geospatial entries (`geopandas`, `rasterio`, `earthengine-api`) are needed only by the extraction and batch scripts, which import them lazily. Modeling work runs without them installed.
