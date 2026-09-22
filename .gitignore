@@ -14,6 +14,10 @@ __pycache__/
 **/data/*
 !**/data/README.md
 !**/data/training_table.csv
+# Keep the bundled historical yield input while ignoring other raw data.
+!crop-yield/data/raw/
+crop-yield/data/raw/*
+!crop-yield/data/raw/yield_df.csv
 
 # Training run outputs (model bundles, metrics, plots)
 **/models/*

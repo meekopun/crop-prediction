@@ -4,20 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository shape
 
-Two independent handoff bundles, each with its own dependency list, conventions,
-and docs. There is no shared root package, no `pyproject.toml`, and no test
-runner config. Directory names contain spaces — always quote paths.
+Two independent projects with direct roots and separate environments:
 
-- `Crop Classification Prediction/package/` — predicts crop **type** for Alberta
-  quarter sections from Sentinel/AAFC features. This is the complete, runnable side.
-- `Crop Yield Prediction/basic_pipeline/` — predicts crop **yield**. This side is
-  partially gutted (see "Missing files" below); treat its docs as a spec, not
-  as a description of what is on disk.
+- `crop-classification/` — crop type prediction for Alberta quarter sections.
+- `crop-yield/` — runnable historical yield benchmark plus incomplete Alberta workflows.
 
-Both were assembled as transfer packages, so files are duplicated across folders
-rather than imported. Check before "deduplicating" anything.
+See root `README.md` for the directory map. Classification has one dependency
+list at its root and one set of docs in `docs/`. Yield uses a conventional
+`src/yield_prediction/` package and `pyproject.toml`; its geospatial dependencies
+remain in `requirements.txt`. Keep existing local inputs and model outputs.
 
-## Crop Classification (`Crop Classification Prediction/package/`)
+## Crop Classification (`crop-classification/`)
 
 ### Running
 
@@ -25,13 +22,12 @@ All scripts use **flat imports** (`from common import ...`, `from ml_features im
 and **CWD-relative paths** (`data/`, `models/`). Consequences:
 
 - Run as `python scripts/05_train_decision_tree.py`, never `python -m`.
-- Run from `Crop Classification Prediction/package/` so `data/` and `models/` resolve.
-- Exception: `scripts/00_extract_study_area.py` has no CLI args and hardcodes
-  `SRC = "quarter_sections.geojson"` at the CWD, but the file actually ships in
-  `raw_data/`. Symlink or copy it up before running step 0.
+- Run from `crop-classification/` so `data/` and `models/` resolve.
+- `scripts/00_extract_study_area.py` reads `raw_data/quarter_sections.geojson`
+  directly, relative to the project directory. It has no CLI arguments.
 
 ```bash
-pip install -r requirements.txt          # identical copy also in docs/ and preprocessing/
+pip install -r requirements.txt
 earthengine authenticate                 # needed for any 02_* script
 ```
 
@@ -50,8 +46,9 @@ python scripts/07_compare_feature_sets.py --input data/sentinel2_pixel_samples.c
 ```
 
 Step 2 exports to Drive by default and the CSV must be downloaded into `data/`
-manually before step 4. `data/training_table.csv` and `data/sentinel2_pixel_samples.csv`
-ship prebuilt, so training/comparison work can start at step 5 without GEE access.
+manually before step 4. `data/training_table.csv` is tracked; `data/sentinel2_pixel_samples.csv` is a
+local export. With the required table available, training can start at step 5
+without GEE access.
 
 ### Key architectural facts
 
@@ -97,37 +94,28 @@ self-contained pixel-only bundle. Its copies differ substantively:
 A fix to a pixel script usually needs applying in both copies. `scripts/05` and
 `scripts/07` are the only training path — `preprocessing/` has no trainer.
 
-### Duplicated docs
-
-`docs/{README,RUNBOOK,FILE_MANIFEST}.md` and `docs/requirements.txt` are
-byte-identical to the copies at `Crop Classification Prediction/`. Edit both.
-
-## Crop Yield (`Crop Yield Prediction/basic_pipeline/`)
+## Crop Yield (`crop-yield/`)
 
 ```bash
-pip install -r requirements.txt            # geospatial + GEE and modeling deps
-python -m unittest discover tests          # or: python -m unittest tests.test_cli
+python -m pip install -e '.[ml]'
+PYTHONPATH=src python -m unittest discover -s tests -v
+yield-prediction --data data/raw/yield_df.csv summary
+bash scripts/run_basic_pipeline.sh
 ```
 
-### Missing files — verify before trusting the docs
+The historical CLI, data validation, and chronological benchmark are runnable.
+Source is under `src/yield_prediction/`; inputs are in `data/raw/` and generated
+benchmark output goes to `data/processed/`. Pixel entry points are in `scripts/`
+and the surviving batch extraction code is in `batch_pipeline/`.
 
-`docs/PIPELINE_GUIDE.md` and `docs/HANDOFF_NOTES.md` describe a `yield-prediction`
-console script, a `gee/` folder, and a batch pipeline. Most of that is **not in
-this repo**. Only `src/yield_prediction/pixel_yield.py` survives in the package
-(stale `.pyc` files for `cli`, `data`, `modeling`, `__init__` remain in
-`__pycache__/`, which is why the absence is easy to miss).
+### Incomplete Alberta workflows
 
-Absent but referenced by code or docs: `pyproject.toml`; `src/yield_prediction/{__init__,cli,data,modeling,alberta_ats}.py`;
-`gee/`; `data/`; `reference_inputs/`; `tests/test_{data,modeling}.py`;
-`upstream/crop_classification_batch_pipeline/{quarter_section_batch_utils,copernicus_data_space_utils,build_copernicus_scene_manifest}.py`.
-
-So: `tests/test_cli.py` and `scripts/run_basic_pipeline.sh` cannot pass,
-`upstream/scripts/train_pixel_{yield_models,crop_classifier}.py` fail on
-`from yield_prediction.modeling import ...`, and the batch pipeline scripts fail
-on `from quarter_section_batch_utils import ...`. Only
-`upstream/scripts/estimate_pixel_yield_from_ndvi.py` has its import satisfied.
-Confirm a module exists before editing against it; restoring these is likely the
-real task when work is requested here.
+The older guides in `docs/` remain historical specifications. Missing pieces
+include `alberta_ats.py`, `gee/`, `reference_inputs/`, the full-field preprocessor,
+`batch_pipeline/{quarter_section_batch_utils,copernicus_data_space_utils,build_copernicus_scene_manifest}.py`,
+and the pixel training helpers imported from `modeling.py`. Those workflows need
+restoration and real input data. `scripts/estimate_pixel_yield_from_ndvi.py` has
+its imports satisfied but requires prepared pixels and known field yields.
 
 ### What the surviving code does
 
@@ -136,7 +124,7 @@ real task when work is requested here.
   `NDVI_min` 0.2), quantile-scaled within `row_id` groups and clamped to
   `[min_factor, max_factor]` so group means are preserved. pandas is imported
   lazily inside functions so the module stays importable without ML extras.
-- `upstream/crop_classification_batch_pipeline/crop_classification_pipeline_config.json`
+- `batch_pipeline/crop_classification_pipeline_config.json`
   is the contract for the batch flow: labels may come from AAFC (local raster
   preferred, GEE fallback) but **all predictor features must come from Copernicus
   Data Space Sentinel-2 L2A**, never GEE. Season Apr 1–Oct 1, 7-day aggregation,
