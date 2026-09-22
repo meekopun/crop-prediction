@@ -34,6 +34,7 @@ class CliTests(unittest.TestCase):
         result = subprocess.run(
             [
                 sys.executable,
+                "-S",  # Exclude site-packages even when ML dependencies are installed.
                 "-m",
                 "yield_prediction.cli",
                 "--data",

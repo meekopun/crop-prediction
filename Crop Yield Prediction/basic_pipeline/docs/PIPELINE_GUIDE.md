@@ -1,5 +1,10 @@
 # Pipeline Guide
 
+> Current checkout: the basic historical CLI (Workflow A) has been reimplemented
+> and is runnable; see [the runnable guide](../README.md). Workflows B–F below
+> are legacy handoff specifications and reference missing files and input data.
+> Their file-inclusion claims do not describe this checkout.
+
 ## Overview
 
 This project now has multiple workflow layers. The handoff includes the code and instructions for each layer.

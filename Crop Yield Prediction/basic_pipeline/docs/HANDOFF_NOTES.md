@@ -1,5 +1,9 @@
 # Handoff Notes
 
+> These are historical handoff notes. Several files described as included are
+> absent from this checkout. The basic historical CLI has been reimplemented;
+> see [the current run instructions and limitations](../README.md).
+
 ## Scope
 
 This handoff covers two layers:
