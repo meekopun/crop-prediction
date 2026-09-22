@@ -158,8 +158,8 @@ def main():
     parser.add_argument("--input", default=f"{DATA_DIR}/training_sample.geojson")
     parser.add_argument("--year", type=int, default=2024,
                          help="Growing season year (match your AAFC label year)")
-    parser.add_argument("--project", required=True,
-                         help="Your Google Cloud project ID registered for Earth Engine")
+    parser.add_argument("--project",
+                         help="Override the default saved with earthengine set_project")
     parser.add_argument("--scale", type=int, default=10, help="Reduction scale in meters")
     parser.add_argument("--export", choices=["drive", "local"], default="drive",
                          help="'drive' starts a Drive export task (recommended); "

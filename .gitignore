@@ -15,6 +15,10 @@ __pycache__/
 !**/data/README.md
 !**/data/training_table.csv
 
+# Training run outputs (model bundles, metrics, plots)
+**/models/*
+!**/models/README.md
+
 # C extensions
 *.so
 

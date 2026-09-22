@@ -64,10 +64,11 @@ One-time setup:
 
 ```bash
 earthengine authenticate
+earthengine set_project cropclassification-502620
 ```
 
-You must also pass your Google Cloud project ID at runtime with
-`--project YOUR_GCP_PROJECT_ID`.
+The export scripts use the saved project by default. To override it for one
+run, pass `--project ANOTHER_PROJECT_ID`.
 
 ### AAFC label download
 

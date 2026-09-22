@@ -5,23 +5,29 @@ repository.
 
 ## 1. Environment setup
 
-From the repository root:
+From `Crop Classification Prediction/package/`:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r docs/requirements.txt
 ```
 
 If Earth Engine steps are needed:
 
 ```bash
 earthengine authenticate
+earthengine set_project cropclassification-502620
+python -c "import ee; ee.Initialize(); print(ee.Number(1).getInfo())"
 ```
+
+The project is saved in your local Earth Engine settings and persists across
+terminal sessions. All three export scripts use it when `--project` is omitted;
+pass `--project ANOTHER_PROJECT_ID` to override it for one run.
 
 ## 2. Full polygon pipeline
 
-Run these from the repository root.
+Run these from `Crop Classification Prediction/package/`.
 
 If you only need to train or compare models, you can start directly from:
 
@@ -29,9 +35,16 @@ If you only need to train or compare models, you can start directly from:
 
 ### Step 0: extract study area subset
 
+The source is bundled under `raw_data/`, but the extractor expects it in the
+working directory. Create a symlink once (skip if it already exists):
+
 ```bash
+ln -s raw_data/quarter_sections.geojson quarter_sections.geojson
 python scripts/00_extract_study_area.py
 ```
+
+If the extractor prints `Checkpointed`, repeat the Python command until it
+prints `ALL DONE`. Do not sample from an unfinished GeoJSON.
 
 Primary input:
 
@@ -57,9 +70,7 @@ Primary output:
 ### Step 2: export polygon features from Earth Engine
 
 ```bash
-python scripts/02_gee_sentinel_features.py \
-  --year 2024 \
-  --project YOUR_GCP_PROJECT_ID
+python scripts/02_gee_sentinel_features.py --year 2024
 ```
 
 Typical output path after download from Drive:
@@ -68,7 +79,7 @@ Typical output path after download from Drive:
 
 Notes:
 
-- `--project` is required.
+- `--project` is optional when a default is saved with `earthengine set_project`.
 - The default export mode is Drive.
 - The exported CSV must be downloaded into `data/` before step 4.
 
@@ -176,7 +187,6 @@ python preprocessing/01_select_training_sample.py --n 1500
 ```bash
 python preprocessing/02_gee_pixel_samples.py \
   --year 2024 \
-  --project YOUR_GCP_PROJECT_ID \
   --include-labels \
   --polygon-batch-size 100
 ```

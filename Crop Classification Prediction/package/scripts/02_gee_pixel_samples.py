@@ -237,7 +237,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default=f"{DATA_DIR}/training_sample.geojson")
     parser.add_argument("--year", type=int, default=2024)
-    parser.add_argument("--project", required=True)
+    parser.add_argument("--project",
+                        help="Override the default saved with earthengine set_project")
     parser.add_argument(
         "--label-year",
         type=int,

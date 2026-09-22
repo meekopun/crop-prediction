@@ -25,7 +25,8 @@ For Google Earth Engine:
 
 1. Register a Google Cloud project for Earth Engine.
 2. Run `earthengine authenticate`.
-3. Keep the project ID available for the export step.
+3. Save the default with `earthengine set_project cropclassification-502620`.
+   The export script uses this saved default; `--project` can override it.
 
 ## Assumption
 
@@ -76,7 +77,6 @@ python preprocessing/01_select_training_sample.py \
 ```bash
 python preprocessing/02_gee_pixel_samples.py \
   --year 2024 \
-  --project YOUR_GCP_PROJECT_ID \
   --include-labels \
   --polygon-batch-size 100
 ```
@@ -153,7 +153,6 @@ python preprocessing/01_select_training_sample.py \
 python preprocessing/02_gee_pixel_samples.py \
   --input data/training_sample_extra.geojson \
   --year 2024 \
-  --project YOUR_GCP_PROJECT_ID \
   --include-labels \
   --polygon-batch-size 100 \
   --out-name sentinel2_pixel_samples_extra
