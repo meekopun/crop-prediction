@@ -30,7 +30,12 @@ There are two practical workflows in this repo:
    Exports one row per pixel with Sentinel-2, Sentinel-1, precipitation, and
    optional AAFC labels for higher-resolution training.
 
-Use [the runbook](docs/RUNBOOK.md) for the exact commands.
+Use [the pipeline map](docs/PIPELINE_GUIDE.md) for stage/folder roles and
+[the runbook](docs/RUNBOOK.md) for the exact commands.
+
+For development planning, read [next steps](docs/NEXT_STEPS.md) and the
+[detailed script guide](docs/SCRIPT_GUIDE.md). The [harvest-data assessment](../harvest-data/README.md)
+explains how the supplied farm crop records can provide additional reference labels.
 
 ## Environment requirements
 

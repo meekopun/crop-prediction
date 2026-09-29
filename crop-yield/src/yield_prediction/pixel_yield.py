@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-
 
 DEFAULT_NDVI_WEIGHTS: dict[str, float] = {
     "NDVI_max": 0.5,
@@ -27,6 +25,7 @@ def _scale_series_within_group(
     lower_quantile: float,
     upper_quantile: float,
 ) -> object:
+    import numpy as np
     import pandas as pd
 
     if not isinstance(series, pd.Series):

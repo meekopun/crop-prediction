@@ -20,7 +20,7 @@
     "notes": "Use Copernicus Data Space STAC for discovery and OData for downloads. Derive spectral/phenology features locally from Sentinel-2 L2A."
   },
   "geojson": {
-    "path": "../quarter_sections.geojson",
+    "path": "../data/raw/alberta_quarter_sections.geojson",
     "exclude_road_allowances": true
   },
   "crops_of_interest": [

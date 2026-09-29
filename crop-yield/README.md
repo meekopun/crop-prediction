@@ -1,135 +1,113 @@
-# Run the crop-yield benchmark
+# Crop Yield
 
-The historical-data CLI is runnable. Its previously missing package files have
-been reimplemented for this workflow; this is a new baseline implementation,
-not a recovery of the original model. The Alberta satellite workflows remain
-incomplete: several scripts, helper functions, satellite exports, and observed
-field-yield inputs referenced in the older handoff documentation are absent.
+Historical yield benchmarks, Alberta feature extraction, and pixel modeling are
+organized around workflows A–G in the [pipeline guide](docs/PIPELINE_GUIDE.md).
+The restored source and supplied datasets are now included in the local layout.
 
-## Directory guide
+## Structure
 
-- `src/yield_prediction/`: installable Python package and CLI
-- `scripts/`: benchmark launcher and surviving pixel modeling entry points
-- `tests/`: local CLI, data, and model checks
-- `data/raw/yield_df.csv`: bundled historical input dataset
-- `data/processed/`: generated benchmark results
-- [batch_pipeline/](batch_pipeline/): incomplete Alberta batch workflow
-- `docs/`: historical workflow specifications and handoff notes
-- `pyproject.toml`: package metadata and benchmark dependencies
-- `requirements.txt`: additional dependencies for the Alberta workflows
-
-Only the historical benchmark is complete. The additional pixel scripts need
-prepared inputs; the pixel trainers also reference missing modeling helpers.
-
-## 1. Open the project directory
-
-```bash
-cd crop-yield
+```text
+crop-yield/
+  src/yield_prediction/  # Importable Python implementations and module CLIs
+    alberta_ats.py       # B: provincial geometry downloader
+    data.py, cli.py      # A: historical dataset and CLI
+    modeling.py         # A/F: historical benchmark and pixel trainers
+    pixel_yield.py      # F: known-yield NDVI redistribution
+    yield_index.py      # G: relative yield-potential index
+  gee/                  # C: Earth Engine Code Editor JavaScript and instructions
+  scripts/              # A/F: local launchers and pixel-model entry points
+  batch_pipeline/       # D: separate, still incomplete batch classification route
+  data/
+    raw/                # Historical CSV, ATS geometry, untouched satellite exports
+    processed/          # Generated metrics, predictions and index outputs
+  reference_inputs/     # Supplied yield observations and prepared pixel/lookup table
+  tests/
+  docs/
 ```
 
-From the repository root, enter this directory, then run the remaining commands
-here. This is a command-line project; it does not start a website.
+The original harvest workbooks stay at repository-level `harvest-data/` because
+both projects can use them. They are not yet imported into this pipeline.
 
-## 2. Create and activate a Python environment
+## Setup
+
+From `crop-yield/`:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-The first command creates an isolated environment for the project's packages.
-The second makes `python`, `pip`, and installed commands use that environment
-in the current terminal. If setup has already been completed, you only need to activate it.
-
-## 3. Install the package and modeling dependencies
-
-```bash
 python -m pip install -e '.[ml]'
 ```
 
-`-e` installs this source directory in editable mode, so source edits take effect
-without reinstalling. `[ml]` adds NumPy, pandas, and scikit-learn. Installation
-also registers the `yield-prediction` terminal command. Internet access is needed
-to download dependencies; the actual historical benchmark runs locally.
+If an environment already exists, activate it and reinstall the editable package
+as needed. For extraction dependencies, also install `requirements.txt`.
+`pip install -e .` alone supports the historical summary and standard-library
+module commands; model execution requires ML extras. External extraction needs
+its service credentials and setup.
 
-The larger `requirements.txt` includes geospatial and Earth Engine tools used by
-other workflows. Those are not needed for this benchmark. For a summary alone,
-`python -m pip install -e .` suffices.
-
-## 4. Validate and summarize the data
+## Run the restored historical workflow
 
 ```bash
-yield-prediction --data data/raw/yield_df.csv summary
-```
-
-Reads the CSV, ignores its saved index column, checks required fields and numeric
-values, and reports its coverage. It does not change the original file or train
-a model. Expected output:
-
-```text
-rows: 28242
-areas: 101
-items: 10
-year_min: 1990
-year_max: 2013
-duplicate_records: 2310
-```
-
-## 5. Train and evaluate
-
-```bash
-yield-prediction --data data/raw/yield_df.csv benchmark
-```
-
-This command:
-
-1. Removes 2,310 exact duplicate records, leaving 25,932 records.
-2. Uses area, crop, year, rainfall, pesticide use, and temperature as predictors.
-   The target is `hg/ha_yield`, measured in hectograms per hectare.
-3. Reserves the newest 20% of distinct years for evaluation: 1990–2008 is the
-   training period and 2009–2013 is the held-out test period for this dataset.
-4. Encodes crop and area categories using only the training data. Unseen test
-   categories are allowed without fitting the encoder on test data.
-5. Fits a mean-yield baseline and a 100-tree random forest. The forest uses a
-   fixed random seed for repeatability within the same software environment.
-6. Predicts the held-out records and compares predictions with observed yields.
-7. Writes `data/processed/benchmark/metrics.csv` and `predictions.csv`.
-
-MAE is the average absolute prediction error; RMSE penalizes large errors more
-strongly. Lower values are better for both. R² measures fit relative to the test
-set mean: 1 is perfect, 0 matches that mean, and negative values are worse.
-Divide errors or predictions in hg/ha by 10,000 to convert to tonnes/hectare.
-
-This evaluates historical records with their recorded predictors. It does not
-establish pre-season forecast performance, estimate Alberta pixel yields, or
-save a deployable fitted model. Pooled metrics also combine crops with very
-different yield scales. Rerunning replaces the two result files; choose a new
-directory to keep a separate run:
-
-```bash
-yield-prediction --data data/raw/yield_df.csv benchmark --output-dir data/processed/my_run
-```
-
-## 6. Run checks or use the combined launcher
-
-```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
+yield-prediction summary
+yield-prediction benchmark
+# Or run both through the launcher:
 bash scripts/run_basic_pipeline.sh
 ```
 
-The tests check dataset validation, CLI behavior, separation of training and
-test years, duplicate removal, and prediction output. The launcher runs the
-summary and then the benchmark when its dependencies are available.
+The default dataset resolves to `data/raw/yield_df.csv` from the package location.
+An explicit `--data` override is also supported. Summary reports 28,242 records,
+101 areas, 10 crops and 1990–2013 coverage.
 
-Use `deactivate` when finished to leave the Python environment.
+**The restored benchmark differs from the earlier replacement implementation.**
+It compares linear regression, random forest, gradient boost, KNN, decision tree,
+bagging and optional XGBoost, using a random 70/30 split and shuffled five-fold
+cross-validation. It retains duplicates and prints metrics; it does not write
+benchmark CSVs or accept `--output-dir`. Existing `data/processed/benchmark/`
+CSVs belong to the earlier chronological benchmark and were preserved as prior
+results. Do not attribute those scores to the restored implementation.
 
-## Alberta workflow status
+## Run pixel workflows on the supplied prepared table
 
-The historical CSV does not contain Alberta field-level satellite features.
-The older guides describe extraction, preprocessing, and pixel modeling, but
-required files are missing, including `alberta_ats.py`, `gee/`, the full-field
-preprocessor, batch utility modules, `reference_inputs/`, and pixel training
-functions in `modeling.py`. These workflows need restoration and their real
-input data before they can run. The surviving NDVI redistribution code also
-requires known field yield and a prepared pixel table; it does not independently
-predict an unknown field's yield.
+After installing the package, all three wrappers default to
+`reference_inputs/pixel_level_all_crop_training_features_2021_2023.csv`:
+
+```bash
+python scripts/train_pixel_yield_models.py --feature-set nonleaky
+python scripts/train_pixel_crop_classifier.py --feature-set nonleaky
+python scripts/estimate_pixel_yield_from_ndvi.py
+```
+
+They write under `data/processed/` and accept `--input`/`--output-dir` overrides.
+The supplied table has 749 rows, eight field/crop/year groups and four crop labels.
+That supports local smoke runs but provides limited independent evaluation data.
+NDVI redistribution requires known field yield and does not predict an unknown
+field yield. See [reference input inventory](reference_inputs/README.md).
+
+## Extraction and remaining gaps
+
+- B: `python -m yield_prediction.alberta_ats --help` shows downloader options.
+  Existing local geometry is `data/raw/alberta_quarter_sections.geojson`; do not
+  rerun a download merely to reorganize it.
+- C: [gee/README.md](gee/README.md) explains the restored Earth Engine exporter.
+- D: batch helper modules and the scene-manifest builder remain missing, and
+  direct Copernicus extraction remains unimplemented.
+- E: the monthly export and observed-yield reference are present, but
+  `scripts/build_fullfield_pixel_training_table.py` is still missing.
+- F: both pixel-training implementations and their prepared input are present.
+- G: the relative index module is present; it needs the seasonal GEE export
+  schema, not the differently named monthly full-field pixel export.
+
+## Guides and checks
+
+- [Pipeline guide and current workflow status](docs/PIPELINE_GUIDE.md)
+- [Detailed script behavior](docs/SCRIPT_GUIDE.md)
+- [Next steps for the harvest records](docs/NEXT_STEPS.md)
+- [Transfer inventory and moved paths](docs/HANDOFF_NOTES.md)
+- [Harvest-data assessment](../harvest-data/README.md)
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+Tests follow the restored APIs and check input paths, summary behavior, feature
+exclusion, grouped pixel predictions, and a small historical benchmark. They do
+not validate live Earth Engine or provincial API access.

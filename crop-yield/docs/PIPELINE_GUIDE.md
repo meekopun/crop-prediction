@@ -1,202 +1,166 @@
-# Pipeline Guide
+# Crop yield pipeline guide
 
-> Current checkout: the basic historical CLI (Workflow A) has been reimplemented
-> and is runnable; see [the runnable guide](../README.md). Workflows B–F below
-> are legacy handoff specifications and reference missing files and input data.
-> Their file-inclusion claims do not describe this checkout.
+Updated 2026-09-29 after the missing source and datasets were supplied. This is
+the current workflow map. Run local commands from `crop-yield/` with its package
+installed, or use `PYTHONPATH=src` for Python module/script calls.
 
-## Overview
+## Workflow map
 
-This project now has multiple workflow layers. The handoff includes the code and instructions for each layer.
+| Workflow | Implementation | Current input/status |
+| --- | --- | --- |
+| A: historical benchmark | `src/yield_prediction/{data,modeling,cli}.py` | Bundled CSV; local workflow available |
+| B: ATS geometry | `src/yield_prediction/alberta_ats.py` | Restored downloader; geometry already supplied locally; live API not verified |
+| C: seasonal satellite export | `gee/sentinel2_quarter_sections.js` | Restored; requires GEE asset/project configuration and execution |
+| D: batch crop classification | `batch_pipeline/` | Still missing three helpers; preferred extraction path unimplemented |
+| E: full-field pixel preprocessing | Expected `scripts/build_fullfield_pixel_training_table.py` | Script still absent; raw export and reference inputs now present |
+| F: pixel models/redistribution | `scripts/` plus package modeling modules | Implementations and prepared 2021–2023 table present |
+| G: yield-potential index | `src/yield_prediction/yield_index.py` | Relative index calculation present; requires C-format export |
 
-## Workflow A: Basic package CLI
+A is an independent historical example. B supplies geometry for extraction.
+C and D are alternative feature routes with different schemas. E prepares the
+monthly full-field export for F; the supplied prepared reference table lets F
+run without regenerating E. G consumes C's seasonal polygon table. None of these
+paths currently imports the 2020–2025 harvest Excel workbooks automatically.
 
-Purpose:
-- run a small reproducible summary/benchmark flow against `data/raw/yield_df.csv`
+## A. Historical dataset and benchmark
 
-Files:
-- `src/yield_prediction/cli.py`
-- `src/yield_prediction/data.py`
-- `src/yield_prediction/modeling.py`
-- `data/raw/yield_df.csv`
-
-Commands:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-yield-prediction --data data/raw/yield_df.csv summary
-```
-
-Optional benchmark:
+Input: `data/raw/yield_df.csv`.
 
 ```bash
-pip install -e '.[ml]'
-yield-prediction --data data/raw/yield_df.csv benchmark
+yield-prediction summary
+yield-prediction benchmark
 ```
 
-## Workflow B: Alberta quarter-section extraction
+`data.py` parses records; `cli.py` prints summary or model results;
+`modeling.benchmark_models()` compares six regressors plus optional XGBoost.
+The restored implementation uses a random 70/30 holdout and shuffled five-fold
+CV, retains duplicate records and prints results. It does not save fitted models
+or CSV results. Previous chronological benchmark output under
+`data/processed/benchmark/` is preserved historical output, not a result of this
+restored command. See the [script guide](SCRIPT_GUIDE.md) for metrics and limits.
 
-Purpose:
-- download Alberta ATS quarter sections from the provincial ArcGIS layer
+## B. Alberta quarter-section geometry
 
-Files:
-- `src/yield_prediction/alberta_ats.py`
+Implementation: `src/yield_prediction/alberta_ats.py`.
+Existing supplied source: `data/raw/alberta_quarter_sections.geojson`.
 
-Command:
+Inspect options without network activity:
 
 ```bash
-PYTHONPATH=src python3 -m yield_prediction.alberta_ats --geojson-out data/raw/alberta_quarter_sections.geojson
+python -m yield_prediction.alberta_ats --help
 ```
 
-Optional spatial filter:
+For a future filtered download, use distinct outputs to preserve the supplied source:
 
 ```bash
-PYTHONPATH=src python3 -m yield_prediction.alberta_ats --where "M=4 AND RGE=25 AND TWP=50"
+python -m yield_prediction.alberta_ats \
+  --where "M=4 AND RGE=25 AND TWP=50" \
+  --geojson-out data/raw/ats_pilot.geojson \
+  --gpkg-out data/raw/ats_pilot.gpkg
 ```
 
-Outputs:
-- GeoJSON always
-- GeoPackage also, if `geopandas` is installed
+The downloader paginates the configured provincial ArcGIS layer and combines
+features in memory. It writes GeoJSON and optionally GeoPackage with geopandas.
+Verify service behavior and the returned CRS before relying on the GeoPackage's
+hard-coded CRS. Full-province downloads can be large; no download is necessary
+for the existing supplied geometry.
 
-Notes:
-- this step requires network access to the Alberta ArcGIS REST endpoint
-- this handoff already includes `quarter_sections.geojson` and `data/raw/alberta_quarter_sections.geojson`
+## C. Earth Engine seasonal quarter-section export
 
-## Workflow C: Earth Engine seasonal quarter-section export
+Implementation and setup: [gee/README.md](../gee/README.md).
 
-Purpose:
-- export seasonal quarter-section Sentinel-2 summary features as a flat CSV
-
-Files:
-- `gee/sentinel2_quarter_sections.js`
-- `gee/README.md`
-
-Inputs:
-- quarter-section polygons uploaded to GEE as a table asset
-- a stable quarter-section ID field
-
-Key outputs:
-- one row per `quarter_id + year`
-- ATS metadata
-- AAFC crop fraction fields
-- seasonal Sentinel-2 band and index summaries
-
-Execution outline:
-
-1. Upload quarter-section GeoJSON to GEE.
+1. Prepare/upload the intended polygons as a GEE table asset.
 2. Open `gee/sentinel2_quarter_sections.js` in the Earth Engine Code Editor.
-3. Set `QUARTER_SECTIONS_ASSET`, `QUARTER_ID_FIELD`, `START_YEAR`, and `END_YEAR`.
-4. Run a limited pilot export first.
-5. Download the CSV from Google Drive.
+3. Set asset path, actual identifier property name, years, coverage settings and
+   a small feature limit for a pilot.
+4. Run and inspect the task; download the CSV into `data/raw/`.
 
-## Workflow D: Crop classification batch pipeline
+Output has one row per `quarter_id + year`, seasonal optical statistics, AAFC
+crop fractions, soil-moisture, weather and static context features. It is a
+polygon export, not the supplied monthly pixel table. The broader inputs in
+this restored exporter are separate from D's optical-only feature policy.
 
-Purpose:
-- run batch-oriented crop-label and Sentinel-2 feature extraction for quarter sections
+## D. Batch crop classification (still incomplete)
 
-Files:
-- `batch_pipeline/crop_classification_pipeline_config.json`
-- `batch_pipeline/prepare_crop_classification_batches.py`
-- `batch_pipeline/build_copernicus_scene_manifest.py`
-- `batch_pipeline/run_crop_classification_batch.py`
-- `batch_pipeline/train_one_vs_rest_crop_models.py`
+Present: config, `prepare_crop_classification_batches.py`,
+`run_crop_classification_batch.py`, and `train_one_vs_rest_crop_models.py`.
+
+Still absent:
+
 - `batch_pipeline/quarter_section_batch_utils.py`
 - `batch_pipeline/copernicus_data_space_utils.py`
-- `batch_pipeline/README.md`
+- `batch_pipeline/build_copernicus_scene_manifest.py`
 
-Task summary:
-- split the quarter-section geometry into deterministic processing batches
-- build weekly Sentinel-2 scene manifests for each batch
-- assign AAFC crop labels from either a local raster or GEE
-- compute weekly spectral and vegetation features
-- train one-vs-rest crop classifiers from the batch feature outputs
+The preparation script and JSON config now reference the supplied geometry in
+`data/raw/`. The intended sequence remains prepare batches → discover scenes →
+extract labels/features → train binary crop classifiers. Do not treat it as an
+end-to-end runnable command chain: the runner imports absent utilities and its
+preferred CDSE extraction raises `NotImplementedError`. The legacy Sentinel Hub
+Statistics route also lacks required settings in the supplied config.
 
-External prerequisites:
-- `CDSE_USERNAME`
-- `CDSE_PASSWORD`
-- Google Earth Engine access if using `gee_aafc_only`
-- local AAFC raster if using `local_aafc_raster`
+See [batch_pipeline/README.md](../batch_pipeline/README.md).
 
-Execution order:
+## E. Full-field monthly pixel preprocessing (script still missing)
 
-1. Build deterministic batch and tracker CSVs:
+Present inputs:
 
-```bash
-python3 batch_pipeline/prepare_crop_classification_batches.py
-```
-
-2. Build a Copernicus Data Space weekly scene manifest for one batch:
-
-```bash
-python3 batch_pipeline/build_copernicus_scene_manifest.py --batch-id batch_01
-```
-
-3. Run one end-to-end batch:
-
-```bash
-python3 batch_pipeline/run_crop_classification_batch.py --batch-id batch_01 --label-source gee_aafc_only
-```
-
-4. Train binary crop models from completed batch feature files:
-
-```bash
-python3 batch_pipeline/train_one_vs_rest_crop_models.py
-```
-
-Preprocessing performed by this flow:
-- filters quarter sections, optionally excluding road allowances
-- partitions features into deterministic batches
-- discovers weekly Sentinel-2 scenes by batch/year/week
-- assigns crop labels either from a local AAFC raster or GEE
-- computes weekly spectral and derived vegetation features
-- writes batch feature tables for downstream crop modeling
-
-## Workflow E: Full-field pixel preprocessing
-
-Purpose:
-- standardize a full-field monthly pixel export into a training table
-
-Files:
-- `scripts/build_fullfield_pixel_training_table.py`
-- `data/pixel_crop_features_aci_s2_monthly_csv_quarter_sections_fullfield.csv`
+- `data/raw/pixel_crop_features_aci_s2_monthly_csv_quarter_sections_fullfield.csv`
 - `reference_inputs/Crop Yield Data - Crop Data 2021-2023-2.csv`
 - `reference_inputs/pixel_level_all_crop_training_features_2021_2023.csv`
 
-Command:
+The expected `scripts/build_fullfield_pixel_training_table.py` has not been
+supplied. Its historical specification is to normalize parcel/crop/year keys,
+replace `-9999`, derive NDVI summaries, join observed yields, and build a
+`row_id` grouped modeling table. This describes planned/recovered behavior to
+implement or obtain, not a command available in this checkout.
+
+Use a new generated output under `data/processed/` when this step is restored.
+Keep the supplied reference files unchanged. The monthly export's `ndvi_m04`
+style schema is different from the prepared table's `NDVI_max` style schema.
+
+## F. Prepared-table modeling
+
+The default input for all wrappers is the supplied table in `reference_inputs/`.
+After installing ML extras:
 
 ```bash
-python3 scripts/build_fullfield_pixel_training_table.py \
-  --pixel-input data/pixel_crop_features_aci_s2_monthly_csv_quarter_sections_fullfield.csv \
-  --yield-input "reference_inputs/Crop Yield Data - Crop Data 2021-2023-2.csv" \
-  --lookup-input reference_inputs/pixel_level_all_crop_training_features_2021_2023.csv
+python scripts/train_pixel_yield_models.py --feature-set nonleaky
+python scripts/train_pixel_crop_classifier.py --feature-set nonleaky
+python scripts/estimate_pixel_yield_from_ndvi.py
 ```
 
-Preprocessing performed by this script:
-- normalizes quarter-section identifiers
-- standardizes crop naming
-- coerces year and yield types
-- replaces Sentinel missing-value sentinels such as `-9999` with `NaN`
-- derives NDVI summary features from monthly columns
-- renames location/crop columns into the modeling schema
-- merges pixel features with observed yield references
-- builds `row_id = quarter_section + crop + year`
+Outputs default to separate `data/processed/` subdirectories. Use `--output-dir`
+for a separate run. Yield training uses per-crop OLS/ridge and grouped validation;
+crop classification uses logistic regression/random forest and grouped validation.
+Some groups/classes cannot support held-out evaluation. In-sample `fitted_*`
+predictions are not held-out results. Redistribution uses known field yield.
 
-Output:
-- standardized training CSV for downstream yield modeling
+The table contains 749 pixel rows, eight field/crop/year groups and four crops.
+It is not an automatically imported version of the six harvest Excel reports.
 
-## Workflow F: Downstream Alberta modeling scripts
+## G. Relative yield-potential index
 
-Files:
-- `scripts/train_pixel_yield_models.py`
-- `scripts/train_pixel_crop_classifier.py`
-- `scripts/estimate_pixel_yield_from_ndvi.py`
+Implementation: `src/yield_prediction/yield_index.py`.
+After obtaining a seasonal polygon CSV from C, replace the example filename below
+with its actual downloaded path:
 
-These scripts operate on already-prepared feature tables and are downstream of the extraction/preprocessing steps above.
+```bash
+python -m yield_prediction.yield_index data/raw/alberta_quarter_sections_s2_features.csv
+```
 
-## Dependencies
+The module infers a crop from AAFC fractions/classes, derives seasonal signals,
+standardizes within crop/year and across years within crop, and produces weighted
+relative rankings/classes. Default outputs are `data/processed/yield_potential_index.csv`
+and `data/processed/yield_potential_summary.csv`. It predicts no calibrated
+bushels/acre and learns no relationship to observed harvest yields.
 
-`requirements.txt` covers every workflow in this bundle: extraction, preprocessing, and modeling. The packaged CLI dependencies in `pyproject.toml` are not sufficient for the geospatial and batch workflows.
+## Shared harvest integration and dependencies
 
-The geospatial entries (`geopandas`, `rasterio`, `earthengine-api`) are needed only by the extraction and batch scripts, which import them lazily. Modeling work runs without them installed.
+The separate `../harvest-data/` reports remain original inputs for both projects.
+Their import, unit normalization and field-boundary matching are future work in
+[NEXT_STEPS.md](NEXT_STEPS.md).
+
+`pyproject.toml` installs the package and optional ML dependencies;
+`requirements.txt` adds geospatial/network tools. Dependencies cannot replace
+missing project source. [HANDOFF_NOTES.md](HANDOFF_NOTES.md) lists current assets
+and moved paths; [SCRIPT_GUIDE.md](SCRIPT_GUIDE.md) explains implementation details.

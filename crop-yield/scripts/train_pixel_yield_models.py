@@ -13,7 +13,7 @@ from yield_prediction.modeling import train_pixel_yield_models
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "pixel_level_all_crop_training_features_2021_2023.csv"
+DEFAULT_INPUT = ROOT / "reference_inputs" / "pixel_level_all_crop_training_features_2021_2023.csv"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "processed" / "pixel_yield_models_2021_2023"
 
 

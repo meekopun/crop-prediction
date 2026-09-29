@@ -103,19 +103,28 @@ yield-prediction --data data/raw/yield_df.csv summary
 bash scripts/run_basic_pipeline.sh
 ```
 
-The historical CLI, data validation, and chronological benchmark are runnable.
-Source is under `src/yield_prediction/`; inputs are in `data/raw/` and generated
-benchmark output goes to `data/processed/`. Pixel entry points are in `scripts/`
-and the surviving batch extraction code is in `batch_pipeline/`.
+The supplied source restores the historical multi-model/random-split benchmark,
+pixel trainers, ATS downloader and relative yield index. Preserve these restored
+implementations. The current APIs are `load_records`, `clean_records`,
+`summarize_records`, `benchmark_models`, `train_pixel_yield_models` and
+`train_pixel_crop_classifier`; earlier replacement APIs are no longer present.
+Optional numerical imports are lazy so the historical summary can run without ML.
 
-### Incomplete Alberta workflows
+Source lives in `src/yield_prediction/`, Earth Engine JavaScript in `gee/`, and
+local entry points in `scripts/`. Raw geometry and satellite exports live in
+`data/raw/`; supplied observed-yield/prepared pixel CSVs live in
+`reference_inputs/`. Pixel wrapper defaults target the reference table. Generated
+outputs go under `data/processed/`. Existing benchmark CSVs are results from the
+previous chronological implementation, not from the restored random-split CLI.
 
-The older guides in `docs/` remain historical specifications. Missing pieces
-include `alberta_ats.py`, `gee/`, `reference_inputs/`, the full-field preprocessor,
-`batch_pipeline/{quarter_section_batch_utils,copernicus_data_space_utils,build_copernicus_scene_manifest}.py`,
-and the pixel training helpers imported from `modeling.py`. Those workflows need
-restoration and real input data. `scripts/estimate_pixel_yield_from_ndvi.py` has
-its imports satisfied but requires prepared pixels and known field yields.
+### Remaining incomplete Alberta workflows
+
+The current `docs/PIPELINE_GUIDE.md` records workflows A–G and current availability.
+Only the full-field preprocessor and the three batch files
+`batch_pipeline/{quarter_section_batch_utils,copernicus_data_space_utils,build_copernicus_scene_manifest}.py`
+remain absent among the documented source. The preferred direct-CDSE extraction
+branch remains unimplemented. New harvest Excel import/field matching is separate
+work; supplied 2021–2023 reference CSVs do not imply that integration is done.
 
 ### What the surviving code does
 

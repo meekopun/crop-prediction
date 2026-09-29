@@ -19,9 +19,16 @@ __pycache__/
 crop-yield/data/raw/*
 !crop-yield/data/raw/yield_df.csv
 
+# Supplied reference datasets remain local; keep their inventory in Git.
+crop-yield/reference_inputs/*
+!crop-yield/reference_inputs/README.md
+
 # Training run outputs (model bundles, metrics, plots)
 **/models/*
 !**/models/README.md
+
+# harvest data
+harvest-data/*
 
 # C extensions
 *.so

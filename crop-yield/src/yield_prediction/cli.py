@@ -1,41 +1,59 @@
-"""Commands for the bundled historical crop yield dataset."""
+from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 from pathlib import Path
 import sys
 
-from .data import load_data, summarize
+from .data import DEFAULT_DATASET_PATH, clean_records, load_records, summarize_records
+from .modeling import benchmark_models
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=Path("data/raw/yield_df.csv"))
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("summary", help="Validate and summarize the input CSV")
-    benchmark = commands.add_parser("benchmark", help="Train and evaluate on held-out later years")
-    benchmark.add_argument("--output-dir", type=Path, default=Path("data/processed/benchmark"))
-    args = parser.parse_args(argv)
-    try:
-        if args.command == "summary":
-            for key, value in summarize(load_data(args.data)).items():
-                print(f"{key}: {value}")
-        else:
-            from .modeling import run_benchmark
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Yield prediction utilities")
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=DEFAULT_DATASET_PATH,
+        help="Path to the yield_df.csv dataset",
+    )
 
-            print("Training historical yield benchmark...", flush=True)
-            result = run_benchmark(args.data, args.output_dir)
-            for key, value in result.items():
-                if key != "metrics":
-                    print(f"{key}: {value}")
-            for metric in result["metrics"]:
-                print(f"{metric['model']}: MAE={metric['mae_hg_ha']:.2f} hg/ha, "
-                      f"RMSE={metric['rmse_hg_ha']:.2f} hg/ha, R²={metric['r2']:.4f}")
-            print(f"Results: {args.output_dir.resolve()}")
-    except (OSError, ValueError, RuntimeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    return 0
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("summary", help="Show dataset summary")
+    subparsers.add_parser("benchmark", help="Run model benchmark")
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command == "summary":
+        summary = summarize_records(clean_records(load_records(args.data)))
+        for key, value in asdict(summary).items():
+            print(f"{key}: {value}")
+        return 0
+
+    if args.command == "benchmark":
+        try:
+            results = benchmark_models(args.data)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        for result in results:
+            print(
+                f"{result.model}: "
+                f"test_r2={result.test_r2:.4f}, "
+                f"mse={result.mse:.2f}, "
+                f"mae={result.mae:.2f}, "
+                f"mape={result.mape:.4f}, "
+                f"cv_mean_r2={result.cv_mean_r2:.4f}"
+            )
+        return 0
+
+    parser.error(f"Unknown command: {args.command}")
+    return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

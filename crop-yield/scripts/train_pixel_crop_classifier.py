@@ -14,7 +14,7 @@ from yield_prediction.modeling import train_pixel_crop_classifier
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "pixel_level_all_crop_training_features_2021_2023.csv"
+DEFAULT_INPUT = ROOT / "reference_inputs" / "pixel_level_all_crop_training_features_2021_2023.csv"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "processed" / "pixel_crop_classifier_2021_2023"
 
 

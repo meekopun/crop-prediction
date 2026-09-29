@@ -50,6 +50,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("optional ML dependencies", result.stderr)
 
+    def test_summary_default_path_from_another_directory_without_ml(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-S", "-m", "yield_prediction.cli", "summary"],
+                cwd=directory,
+                env={"PYTHONPATH": str(self.root / "src")},
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        self.assertIn("rows: 28242", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

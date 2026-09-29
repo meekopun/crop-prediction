@@ -6,9 +6,10 @@ describe their configuration and downstream use.
 
 This workflow cannot run yet: `quarter_section_batch_utils.py`,
 `copernicus_data_space_utils.py`, and `build_copernicus_scene_manifest.py` are
-missing. Source geometries, satellite exports, and credentials must also be
-supplied. The JSON configuration describes the intended workflow; it does not
+missing. The supplied geometry is now at `../data/raw/alberta_quarter_sections.geojson`,
+and both the preparation default and config refer to it. Batch satellite exports
+and credentials must still be supplied. The JSON configuration describes the intended workflow; it does not
 establish that its inputs exist.
 
-See [the historical pipeline guide](../docs/PIPELINE_GUIDE.md) for the
-specification or [the project README](../README.md) for the runnable benchmark.
+See [the current pipeline guide](../docs/PIPELINE_GUIDE.md) for the
+status or [the project README](../README.md) for restored local workflows.

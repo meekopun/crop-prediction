@@ -33,6 +33,9 @@ Prepared training data:
 - `README.md`
 - `preprocessing/TUTORIAL.md`
 - `docs/RUNBOOK.md`
+- `docs/PIPELINE_GUIDE.md`
+- `docs/SCRIPT_GUIDE.md`
+- `docs/NEXT_STEPS.md`
 - `docs/FILE_MANIFEST.md`
 
 ## C. Large or environment-specific items
