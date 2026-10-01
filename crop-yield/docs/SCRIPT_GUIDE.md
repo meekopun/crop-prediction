@@ -1,6 +1,6 @@
 # Crop yield: script-by-script process
 
-Updated 2026-09-29 for the newly supplied source. Paths are relative to
+Updated 2026-10-01 for the newly supplied batch helpers and scene-manifest builder. Paths are relative to
 `crop-yield/`. Run local commands from that directory after editable installation.
 The [pipeline guide](PIPELINE_GUIDE.md) is the execution/status map.
 
@@ -34,10 +34,10 @@ error. It does not accept `--output-dir` or write benchmark CSVs.
 
 1. Read/clean the historical CSV. It retains duplicate rows.
 2. Use all retained columns except yield as predictors. Impute categorical
-   values, one-hot encode area/crop, and impute/standardize numeric predictors.
+  values, one-hot encode area/crop, and impute/standardize numeric predictors.
 3. Make a random 70/30 training/test split with seed 42 by default.
 4. Fit linear regression, random forest, gradient boost, KNN, decision tree,
-   bagging and optional XGBoost through preprocessing pipelines.
+  bagging and optional XGBoost through preprocessing pipelines.
 5. Evaluate the holdout and separately run shuffled five-fold CV over the input.
 6. Return metric dataclasses sorted by test R²; fitted models are not saved.
 
@@ -62,6 +62,8 @@ not orchestrate satellite extraction or harvest import.
 
 ## B. Provincial geometry
 
+
+
 ### `src/yield_prediction/alberta_ats.py`
 
 **Input:** ArcGIS `--where` filter and page size (default 1,000). Constructs query
@@ -79,6 +81,8 @@ verify CRS before using that output. Existing local geometry need not be downloa
 again. Full-province collection is in memory, not streamed to disk.
 
 ## C. Seasonal satellite export
+
+
 
 ### `gee/sentinel2_quarter_sections.js`
 
@@ -102,6 +106,8 @@ Cloud masking and band scaling need scientific validation; a local syntax check
 does not execute Earth Engine. See [gee/README.md](../gee/README.md).
 
 ## F. Restored pixel learning functions and wrappers
+
+
 
 ### `src/yield_prediction/modeling.py`: pixel feature sets
 
@@ -157,6 +163,8 @@ headline score. This function is now present and importable.
 
 ## NDVI redistribution: existing calculation, prepared data required
 
+
+
 ### `src/yield_prediction/pixel_yield.py`
 
 **Input:** pixel table containing `row_id`, `yield_bu_ac`, `NDVI_max`, `NDVI_integral_proxy` and `NDVI_min` by default. The group is intended to identify a field-year with one known yield repeated across its pixels.
@@ -187,9 +195,11 @@ headline score. This function is now present and importable.
 
 **Model role:** CLI wrapper around the fixed NDVI calculation, not a trained yield predictor.
 
-**Harvest limitation:** supplying Excel harvest reports alone is insufficient. Prepare matching pixel NDVI statistics, verified group IDs and a known field yield. The wrapper expects `yield_bu_ac`; `lb/ac` observations must not be relabeled as bushels. The classification export's monthly `NDVI_*` columns do not directly supply all required summary column names.
+**Harvest limitation:** supplying Excel harvest reports alone is insufficient. Prepare matching pixel NDVI statistics, verified group IDs and a known field yield. The wrapper expects `yield_bu_ac`; `lb/ac` observations must not be relabeled as bushels. The classification export's monthly `NDVI_`* columns do not directly supply all required summary column names.
 
 ## G. Relative yield-potential index
+
+
 
 ### `src/yield_prediction/yield_index.py`
 
@@ -207,65 +217,296 @@ rank and label low/medium/high; write per-year results and quarter-section summa
 yield and does not output calibrated bushels/acre. Rankings depend on the supplied
 comparison population. The monthly full-field pixel CSV is not a drop-in input.
 
-## Older batch classification workflow inside the yield project
+## D. Batch crop classification inside the yield project
 
-This folder's name can be confusing: it primarily prepares and classifies crop types. It does not connect harvest workbooks to a working yield regressor.
+All six Python files in `batch_pipeline/` are now present. This workflow predicts
+**crop identity**, not harvested yield. AAFC crop codes are its targets; optical
+satellite measurements are its predictors. It does not import the harvest workbooks.
+
+### How the scripts connect
+
+
+| Stage                                | File                                     | Result for the model                                                       |
+| ------------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------- |
+| Divide the geometry                  | `prepare_crop_classification_batches.py` | Reproducible lists of parcels to process                                   |
+| Select parcels and track work        | `quarter_section_batch_utils.py`         | Shared IDs, batch ranges and progress records                              |
+| Describe candidate satellite scenes  | `copernicus_data_space_utils.py`         | Search results and product/download metadata                               |
+| Save weekly scene candidates         | `build_copernicus_scene_manifest.py`     | A scene manifest, **not a training feature table**                         |
+| Obtain labels and optical predictors | `run_crop_classification_batch.py`       | Intended quarter-section/year feature table; direct CDSE branch unfinished |
+| Evaluate crop classifiers            | `train_one_vs_rest_crop_models.py`       | Binary crop probabilities and cross-validation metrics                     |
+
+
+The intended sequence is preparation → discovery → extraction → training. There
+is currently a gap between discovery and extraction: the manifest builder does
+not download/process imagery, and the runner does not consume its manifest.
+Restoring these files resolves missing imports, but does not finish that gap.
+
+Local checks on 2026-10-01 found `requests` missing in `crop-yield/.venv`.
+Preparation and trainer `--help` passed; the manifest builder and combined runner
+stop at the `requests` import. All six files passed syntax parsing. This confirms
+source coverage and available command-line imports, not completed extraction.
 
 ### `batch_pipeline/prepare_crop_classification_batches.py`
 
-**Input:** source GeoJSON and JSON config. Default geometry is the supplied `data/raw/alberta_quarter_sections.geojson`; the JSON config references the same file.
+**Inputs and controls:** `--geojson`, `--config`, `--batches-out`, `--tracker-out`.
+The copied default still points at `crop-yield/quarter_sections.geojson`, which is
+absent. The actual geometry is `data/raw/alberta_quarter_sections.geojson`; use
+`--geojson data/raw/alberta_quarter_sections.geojson` from `crop-yield/`.
+Changing `geojson.path` in the config does not change this script's separate
+`--geojson` default.
 
-**Process:** stream features with a JSON decoder; optionally exclude road-allowance features using the `ra` property; count eligible features; divide their ordered indices into configured batches (40 by default); assign configured assignee labels cyclically; initialize progress fields.
+**Process:**
 
-**Output:** `quarter_section_batches.csv` with start/end ranges and `quarter_section_tracker.csv` with counts/status/timestamps.
+1. Load batching settings and the road-allowance filter from JSON.
+2. Stream the source GeoJSON with a JSON decoder and count eligible features.
+  When exclusion is enabled, only lowercase `ra` values of `None`, `""` or
+   `"null"` are retained. Uppercase `RA` is not checked.
+3. Divide the filtered source order into 40 contiguous batches by default.
+  Start/end indices are half-open: `[feature_start, feature_end)`. Ranges are
+   approximately equal in feature count, without crop stratification or shuffling.
+4. Name batches `batch_01`, `batch_02`, etc. and alternate the configured assignee
+  labels (`person_a`, `person_b`). These are bookkeeping labels.
+5. Write the plan and initialize tracker statuses to `pending`, counts to zero,
+  and timestamps/notes to empty values.
 
-**Model role:** schedules data preparation, without selecting crop labels, extracting features or learning a model.
+**Outputs:** `batch_pipeline/quarter_section_batches.csv` and
+`batch_pipeline/quarter_section_tracker.csv` by default. The latter records
+overall, label, satellite and model status, plus counts and notes. Later scripts
+update some statuses; the initialized per-parcel counts are not a verified
+per-parcel completion ledger.
 
-**Status/limits:** source and config must be supplied correctly. Index ranges depend on unchanged source ordering and filtering. Existing tracker files are overwritten. The parser's buffer-growth loop should be checked before general reuse: an incomplete feature occupying the read threshold can fail to trigger another read. This script is not a verified general-purpose streaming importer.
+**Model role:** partitions extraction work. It does not create crop labels,
+satellite predictors or fitted models.
+
+**Limits:** rerunning overwrites the tracker and plan. Source ordering and the
+filter must stay consistent after planning. Its incremental parser can stall when
+an incomplete feature occupies at least the 65,536-character read threshold,
+because it stops reading while repeatedly attempting to decode that buffer.
+This parser limitation also exists in the shared utility below.
+
+### `batch_pipeline/quarter_section_batch_utils.py`
+
+**Input:** config JSON, batch/tracker CSVs, the source GeoJSON and requested batch
+ranges. This is an imported helper module, with no command-line entry point.
+
+**Process and function responsibilities:**
+
+- `BatchSpec` stores batch ID, assignee, start/end indices and feature count.
+`load_batches()` reads the CSV into these records; `get_batch()` finds a
+requested ID or raises an error.
+- `load_config()` reads JSON. `resolve_path()` resolves relative paths against a
+supplied directory; `output_paths()` instead uses this module's directory
+(`batch_pipeline/`) for configured outputs. Geometry callers also use that
+directory, even when `--config` points elsewhere.
+- `iter_geojson_features()` incrementally decodes GeoJSON features.
+`include_feature()` and `iter_filtered_geojson_features()` apply the same
+lowercase `ra` filter as preparation.
+- `collect_batch_features()` walks the filtered sequence from its beginning,
+skips entries before `feature_start`, and keeps entries before `feature_end`.
+These are indices in the **filtered** sequence, not the raw file.
+- `feature_identifier()` prefers `pid`, `PID`, `id`, then `ID`; otherwise it
+constructs `feature_0000000`-style IDs from the supplied index.
+`write_geojson()` saves a selected FeatureCollection.
+- `load_tracker()` reads tracker values as strings. `update_tracker()` updates
+matching rows and rewrites the CSV. `append_note()` joins notes with `|`;
+`tracker_note()` saves the updated notes. `iso_date()` formats a date string.
+
+**Outputs:** returned feature lists, batch records, paths and identifiers;
+explicit calls can write subset GeoJSONs and rewrite the tracker.
+
+**Model role:** keeps geometry selection, labels and features tied to the same
+parcel/year keys. It performs no learning or satellite extraction.
+
+**Limits:** fallback IDs are batch-local in the runner, so they can repeat across
+batches; stable source IDs are needed before joining training data. Each batch
+scan starts at the beginning of the large source file. Tracker writes have no
+locking, so concurrent processes can overwrite each other's updates. The
+streaming-parser limitation described above remains.
+
+### `batch_pipeline/copernicus_data_space_utils.py`
+
+**Input:** geometry, season dates, cloud threshold, configured endpoints and
+`CDSE_USERNAME` / `CDSE_PASSWORD`. Imported by the manifest builder; it has no
+command-line entry point. It imports `requests`.
+
+**Process and function responsibilities:**
+
+1. `iso_date_range()` constructs a season's dates. `weekly_ranges()` divides
+  that interval into numbered seven-day windows, shortening the last window.
+2. `bbox_union()` visits Polygon/MultiPolygon coordinates and returns one
+  `[min_lon, min_lat, max_lon, max_lat]` rectangle covering the batch.
+3. `cdse_client_from_env()` requires the two environment variables and builds
+  `CDSEClient` with the endpoints from JSON.
+4. `CDSEClient.access_token()` can request a password-grant access token and
+  cache it. The manifest builder does **not** call this method, and the search
+   and product-lookup methods send no authorization header in this code.
+5. `search_sentinel2_l2a()` posts a STAC search for `sentinel-2-l2a`, bounding box,
+  date window and maximum `eo:cloud_cover`. It converts the response's features
+   into `SceneItem` records containing scene ID, time, cloud cover, collection,
+   bounds, geometry and product name.
+6. `resolve_product_uuid()` looks up the product name through OData and returns
+  its UUID or `None`. `product_download_url()` constructs a `$value` URL string.
+
+**Output:** dates, bounds, scene metadata, product UUIDs and URL strings.
+Constructing a download URL does not fetch the raster.
+
+**Model role:** supplies candidate imagery metadata for a future extractor.
+It currently produces no band values, vegetation indices or crop predictions.
+
+**Limits:** search reads only the first response page, without following
+pagination. The access token has no expiry/refresh handling. Geometry must be a
+nonempty set of supported polygons in longitude/latitude coordinates. Discovery
+endpoints and credentials have not been validated by the documentation update.
+
+### `batch_pipeline/build_copernicus_scene_manifest.py`
+
+**Inputs and controls:** required `--batch-id`; optional `--config`, `--years`
+and `--limit-per-week` (default 8). Years default to 2021–2023 in the code.
+Requires the batch/tracker CSVs, matching source geometry, `pandas`, `requests`,
+and the environment variables required by the CDSE client factory.
+
+**Process:**
+
+1. Load config/output paths and the requested batch range.
+2. Collect that batch's filtered polygons and compute a single union bounding
+  box. This rectangle can include land between widely separated parcels.
+3. Mark `sentinel2_status` as `running`.
+4. For each requested year, use the configured April 1–October 1 season and
+  generate seven-day date windows. The helper uses fixed seven-day windows;
+   it does not read `season.aggregation_interval`.
+5. Search each window using the configured cloud threshold (60 by default) and
+  requested result limit. Sort the returned candidates by cloud cover then time,
+   treating unknown cloud cover as 999. This ranks only the returned page, not
+   every possible scene.
+6. Resolve each product's UUID and construct a download URL where available.
+7. Save the manifest, set `sentinel2_status` to `manifest_ready`, and append a
+  tracker note.
+
+**Output:** `batch_pipeline/scene_manifests/<batch_id>_cdse_scene_manifest.csv`.
+Rows contain batch ID, year, week index/start/end, rank, scene ID, product name,
+product UUID, download URL, timestamp, cloud cover and collection. A blank URL
+means product lookup returned no UUID.
+
+**Model role:** records which imagery could support weekly predictors.
+`manifest_ready` means discovery finished; it does not mean features are ready.
+
+**Limits:** no imagery download, cloud masking, polygon statistics, feature CSV
+or training occurs here. A failed request can leave the tracker as `running`,
+and rows are not checkpointed before completion. An empty search result creates
+an empty DataFrame without a defined column schema. The runner does not load
+this manifest. The copied config still needs its geometry path corrected.
 
 ### `batch_pipeline/run_crop_classification_batch.py`
 
-**Intended input:** batch ID, geometry, batch/config files, optional years (default 2021–2023), AAFC label source and satellite service credentials.
+**Inputs and controls:** required `--batch-id`; `--config`, `--years` (default
+2021–2023), `--label-source` and `--sentinel-source`. Both source options default
+to `preferred`, which resolves the corresponding JSON choice.
 
-**Visible process:**
+**Process:**
 
-1. Load config/batch through `quarter_section_batch_utils`, collect geometry and mark tracker status running.
-2. Save the batch GeoJSON. Obtain majority crop labels either by masking a local AAFC raster or calling AAFC/ACI in Earth Engine.
-3. Choose the satellite source. The preferred `copernicus_data_space` path raises `NotImplementedError`.
-4. The surviving alternative constructs a Sentinel Hub **Statistics API** request, despite the option name `sentinel_hub_process_api`. It fetches optical band statistics in weekly intervals.
-5. Flatten weekly means, derive vegetation/red-edge/color/flowering indices, then calculate seasonal means/extremes/ranges, peak week and early/mid/late growth summaries.
-6. Join crop labels on quarter section and year, write features, and update tracker state or failure notes.
+1. Load the batch, mark overall status `running`, collect its polygons and save
+  `batch_geojson/<batch_id>.geojson`.
+2. Obtain one majority AAFC crop code per quarter-section/year. The local route
+  masks a yearly raster and takes the most frequent valid positive code; it
+   requires `rasterio` and a nonempty `local_raster_pattern` with `{year}` as needed.
+   The alternative calls Earth Engine's AAFC/ACI mode reducer and maps crop codes
+   to labels. It uses the hard-coded project `satellite-analysis-489120`.
+3. Mark labels `completed`, then select the satellite route. The preferred
+  `copernicus_data_space` branch explicitly raises `NotImplementedError`.
+4. The alternative option `sentinel_hub_process_api` actually uses the
+  **Sentinel Hub Statistics API**. Given valid service settings and credentials,
+   it requests seven-day optical-band means for each polygon/year at the
+   configured resolution, cloud threshold and aggregation interval.
+5. Flatten B02/B03/B04/B05/B06/B07/B08/B8A/B11/B12 means into weekly columns.
+  Derive NDVI, NDRE1/2, GNDVI, NDMI, EVI, yellow/blue ratio, VARI, NGRDI,
+   flowering contrast and red/green ratio from those band means.
+6. Join labels by `quarter_section` and `year`; add index means/min/max/amplitude,
+  peak week, early/middle/late-season means, greenup and senescence deltas.
+7. Save the feature table and mark overall status `features_ready` and satellite
+  status `completed`. On an exception, mark overall status `failed`, append the
+   error to tracker notes and re-raise it.
 
-**Intended output:** batch GeoJSON, `batch_features/<batch-id>_features.csv`, and tracker updates.
+**Intended outputs:** batch GeoJSON, tracker updates, and
+`batch_pipeline/batch_features/<batch_id>_features.csv` with parcel/year keys,
+location/legal metadata, `crop_label`, `label_code` and numerical predictors.
+The feature CSV requires a successful extraction branch.
 
-**Model role:** creates predictors and crop targets for the following binary classifier. It fits no classifier or yield model.
+**Model role:** creates the target/predictor table that the binary trainer needs.
+Color ratios and time-window summaries describe spectral differences and crop
+seasonality. It does not fit the classifier or predict yield.
 
-**Actual blockers:** `quarter_section_batch_utils.py` is absent; preferred CDSE extraction is unimplemented; the referenced scene-manifest builder is absent; local raster path is blank; the supplied config lacks the legacy Statistics endpoint. The GEE path hard-codes project `satellite-analysis-489120`, unlike the main classification exporters' saved-default behavior.
-
-**Review before restoration:** local raster geometry is not reprojected to the raster CRS in this function; the shown evalscript exposes SCL but does not use it to mask clouds in its dataMask; all-NaN temporal groups can fail during peak-week computation. Labeling and feature availability need validation, not just restored imports.
+**Current blockers and limits:** the preferred CDSE branch is unfinished; the
+local raster pattern is blank; the config lacks the alternative route's
+`statistics_endpoint`. That route also requires `SENTINEL_HUB_CLIENT_ID` and
+`SENTINEL_HUB_CLIENT_SECRET` plus compatible OAuth settings. Setting GEE as a
+label source alone does not resolve satellite extraction. The configured label
+fallback is not an automatic retry; select it explicitly. Local raster sampling
+does not reproject GeoJSON into the raster CRS. The evalscript outputs SCL but
+its data mask does not exclude cloudy SCL classes. An all-missing weekly series
+can fail at `np.nanargmax()` while calculating peak week. The runner does not
+read the CDSE manifest or enforce every configured feature-policy setting.
 
 ### `batch_pipeline/train_one_vs_rest_crop_models.py`
 
-**Intended input:** batch feature CSVs with `crop_label`, `quarter_section`, `year` and numeric predictors.
+**Inputs and controls:** `--input-glob` (default `batch_features/*_features.csv`,
+relative to `batch_pipeline/`), optional `--batch-ids`, `--config`, `--output-dir`,
+`--cv-splits` (5), `--top-features-per-crop` (32) and `--logistic-c` (1.0).
+Requires `pandas`, `numpy`, `scikit-learn`, and completed feature CSVs containing
+`crop_label`, `quarter_section`, `year` and numeric predictors.
 
-**Visible process:**
+**Process:**
 
-1. Load/concatenate selected batch CSVs; identify numeric features excluding target, location and ATS metadata.
-2. Construct group keys from quarter section + year.
-3. For each observed crop, create a binary label and rank features by absolute correlation with that label. Keep up to 32 features by default.
-4. Use shuffled `StratifiedGroupKFold` (up to five folds), skipping folds without both classes in train or test.
-5. Fit median imputation, standardization and balanced logistic regression within each evaluated fold; write out-of-fold positive-class probabilities.
-6. Calculate precision, recall, F1, ROC-AUC and average precision at a 0.5 classification threshold; optionally update tracker entries.
+1. Load/concatenate matching CSVs, optionally restricting filenames to batch IDs.
+2. Select numeric/bool columns while excluding target, label code, coordinates,
+  legal-description metadata, parcel ID and year. Other numeric columns are not
+   checked against a Sentinel-2 allowlist.
+3. Group rows by `quarter_section|year` and loop over every observed crop label,
+  rather than filtering to JSON `crops_of_interest`.
+4. Encode each crop as 1 versus all other crops as 0. Rank predictors by absolute
+  Pearson correlation with that binary target and retain up to 32 by default.
+5. Build shuffled `StratifiedGroupKFold` splits with seed 42, using at most the
+  number of distinct groups. Skip folds whose train or test set lacks both classes.
+6. In each evaluated fold, fit median imputation, standard scaling and balanced
+  logistic regression (`lbfgs`, up to 5,000 iterations, configured C). Predict
+   held-out crop probabilities and apply a 0.5 decision threshold.
+7. Calculate precision, recall, F1, ROC AUC and average precision for evaluated
+  rows. Save combined metric/prediction tables; when `--batch-ids` is supplied,
+   set those batches' model status to `completed`.
 
-**Intended output:** `binary_crop_model_metrics.csv` and `binary_crop_predictions.csv`. No fitted model bundle is saved.
+**Outputs:** `batch_pipeline/model_outputs/binary_crop_model_metrics.csv` and
+`binary_crop_predictions.csv` by default. Metrics include positive-row count,
+selected-feature count and evaluated-row count. Predictions include parcel/year,
+crop name, binary truth, probability and a `yes`/`no` label. It does not save a
+fitted inference model, selected-feature names or a multiclass winner.
 
-**Model role:** evaluates binary crop identity classifiers, not yield regression.
+**Model role:** evaluates a separate “is this crop?” classifier for each label.
+Multiple crops can receive positive decisions; these are not mutually exclusive
+multiclass predictions.
 
-**Actual status/limits:** missing batch utilities prevent import. Feature ranking currently uses the entire dataset before cross-validation, leaking held-out labels into feature selection; move selection inside each training fold before relying on scores. Quarter-section/year grouping can allow the same quarter section in different years across folds. Unevaluated rows keep missing probabilities but receive a `no` label through a fill operation, so they must not be counted as evaluated negative predictions.
+**Limits:** feature ranking occurs on the full dataset **before** cross-validation,
+so held-out labels influence selection and scores can be optimistic. Move ranking
+inside each training fold before relying on results. Parcel/year grouping allows
+the same parcel in different years to cross folds; it does not measure strict
+new-field or future-year generalization. Fewer than two groups is unsupported.
+Unevaluated rows retain missing probabilities but receive `no` via a fill
+operation; they must not be counted as evaluated negatives. A `completed` tracker
+status does not imply an inference-ready saved model or trustworthy validation.
 
 ### `batch_pipeline/crop_classification_pipeline_config.json`
 
-Configuration, not an executable script. Describes source choices, geometry path, crop interests, weekly April–October-1 season, 10 m requested resolution, 40 batches and output directories. It prefers local AAFC labels and CDSE optical features and lists weather/soil/terrain as excluded feature families for this older workflow. These are local configuration settings, not instructions to change the user's project goals. Some settings are not enforced directly by surviving code; missing endpoints/paths and unimplemented branches prevent a runnable configuration.
+Configuration, not executable code. It describes AAFC label choices, CDSE/legacy
+satellite routes, optical feature families, four crop interests, April–October
+season, 10 m requested resolution, 60% cloud threshold, 40 batches and outputs.
+These settings describe this workflow's intended design; they are not instructions
+to change the user's project objectives. Several settings are only partly enforced
+by the scripts, as described above.
+
+The copied `geojson.path` is `../quarter_sections.geojson`. Set it to
+`../data/raw/alberta_quarter_sections.geojson` before discovery or extraction;
+these paths are relative to `batch_pipeline/`. Preparation additionally needs its
+explicit `--geojson` override. The local AAFC raster pattern remains empty and
+legacy Statistics settings remain absent. See [the batch README](../batch_pipeline/README.md)
+for current command locations and prerequisites.
 
 ## E. Full-field preprocessing: remaining missing script
 
@@ -279,23 +520,22 @@ to run independently of that missing preprocessing step.
 
 ## Tests and configuration
 
-| File | Current role |
-| --- | --- |
-| `tests/test_data.py` | Check default bundled path, dataset coverage and restored record conversions |
-| `tests/test_cli.py` | Check summary, default path from another working directory, and missing-ML error |
+
+| File                     | Current role                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `tests/test_data.py`     | Check default bundled path, dataset coverage and restored record conversions                                       |
+| `tests/test_cli.py`      | Check summary, default path from another working directory, and missing-ML error                                   |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs and a small restored historical benchmark |
-| `pyproject.toml` | Package, CLI registration and optional ML dependencies |
-| `requirements.txt` | Broader extraction/modeling dependencies |
+| `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
+| `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |
+
 
 Eight tests cover local package behavior. They do not validate live downloads,
-Earth Engine execution, original harvest import, or missing batch helpers.
+Earth Engine execution, original harvest import, or the incomplete CDSE extraction route.
 
 ## What remains absent
 
 - `scripts/build_fullfield_pixel_training_table.py`
-- `batch_pipeline/quarter_section_batch_utils.py`
-- `batch_pipeline/copernicus_data_space_utils.py`
-- `batch_pipeline/build_copernicus_scene_manifest.py`
 
 The preferred direct-CDSE branch remains unimplemented. Follow
 [NEXT_STEPS.md](NEXT_STEPS.md) for the separate harvest-data integration plan.

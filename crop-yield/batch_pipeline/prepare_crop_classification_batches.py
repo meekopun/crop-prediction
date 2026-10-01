@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_GEOJSON = ROOT.parent / "data" / "raw" / "alberta_quarter_sections.geojson"
+DEFAULT_GEOJSON = ROOT.parent / "quarter_sections.geojson"
 DEFAULT_CONFIG = ROOT / "crop_classification_pipeline_config.json"
 DEFAULT_BATCHES = ROOT / "quarter_section_batches.csv"
 DEFAULT_TRACKER = ROOT / "quarter_section_tracker.csv"

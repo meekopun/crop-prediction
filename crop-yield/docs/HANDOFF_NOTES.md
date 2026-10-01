@@ -1,6 +1,6 @@
 # Transfer inventory and layout changes
 
-Updated 2026-09-29 after the additional source and datasets were supplied.
+Updated 2026-10-01 after the additional batch helpers were supplied.
 This inventory distinguishes present files from still-missing components.
 
 ## Present source
@@ -9,7 +9,8 @@ This inventory distinguishes present files from still-missing components.
   data module, historical/pixel modeling, and NDVI redistribution.
 - `gee/sentinel2_quarter_sections.js`: supplied seasonal GEE exporter.
 - `scripts/`: basic launcher and three pixel modeling/redistribution wrappers.
-- `batch_pipeline/`: config, preparation, runner and binary classifier.
+- `batch_pipeline/`: config and all six scripts: preparation, batch utilities,
+  CDSE utilities, scene-manifest builder, runner and binary classifier.
 - `pyproject.toml`, `requirements.txt`, `tests/` and current documentation.
 
 ## Present local data
@@ -43,17 +44,21 @@ rewriting their contents; geometry was not duplicated.
 The monthly full-field export stays in `data/raw/`; the pipeline guide now uses
 that path consistently. The recovered data module's outdated `archive/yield_df.csv`
 default was corrected to `data/raw/yield_df.csv`. Pixel wrapper defaults and batch
-geometry references were updated. Use explicit `--input` for other prepared tables.
+geometry references were updated during organization. The later batch-file
+transfer restored the old geometry references in preparation and config: supply
+`--geojson data/raw/alberta_quarter_sections.geojson` to preparation and set config
+`geojson.path` to `../data/raw/alberta_quarter_sections.geojson`. The documentation
+update records that mismatch without changing the supplied Python/config files.
+Use explicit `--input` for other prepared tables.
 
 ## Still missing
 
 - `scripts/build_fullfield_pixel_training_table.py`
-- `batch_pipeline/quarter_section_batch_utils.py`
-- `batch_pipeline/copernicus_data_space_utils.py`
-- `batch_pipeline/build_copernicus_scene_manifest.py`
 
 The preferred direct-CDSE extraction branch is still unimplemented. No placeholder
-files were added for these gaps. Credentials, uploaded GEE assets and a future
+files were added for these gaps. Scene discovery is now implemented, but the
+manifest builder does not download/process imagery and the runner does not consume
+its output. Credentials, uploaded GEE assets and a future
 seasonal export are separate runtime requirements, not missing Python modules.
 
 ## Verification and scientific scope
@@ -62,6 +67,12 @@ Local verification includes the restored summary, eight tests, the three pixel
 entry points using supplied data with outputs directed to a temporary directory,
 and module help/syntax checks. Live downloads and Earth Engine exports are not
 part of a directory reorganization. Input hashes are checked across moves.
+
+The 2026-10-01 documentation update checked coverage of all six batch scripts,
+their syntax and local Markdown links. Preparation and trainer `--help` passed.
+Manifest-builder and runner help checks failed because `requests` is absent from
+the current `.venv`; the files themselves are present. No live scene discovery
+or batch feature extraction was validated by those checks.
 
 See [PIPELINE_GUIDE.md](PIPELINE_GUIDE.md) for workflow order and
 [SCRIPT_GUIDE.md](SCRIPT_GUIDE.md) for implementation behavior.

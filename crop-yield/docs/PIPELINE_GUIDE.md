@@ -1,6 +1,6 @@
 # Crop yield pipeline guide
 
-Updated 2026-09-29 after the missing source and datasets were supplied. This is
+Updated 2026-10-01 after the batch helpers and scene-manifest builder were supplied. This is
 the current workflow map. Run local commands from `crop-yield/` with its package
 installed, or use `PYTHONPATH=src` for Python module/script calls.
 
@@ -11,7 +11,7 @@ installed, or use `PYTHONPATH=src` for Python module/script calls.
 | A: historical benchmark | `src/yield_prediction/{data,modeling,cli}.py` | Bundled CSV; local workflow available |
 | B: ATS geometry | `src/yield_prediction/alberta_ats.py` | Restored downloader; geometry already supplied locally; live API not verified |
 | C: seasonal satellite export | `gee/sentinel2_quarter_sections.js` | Restored; requires GEE asset/project configuration and execution |
-| D: batch crop classification | `batch_pipeline/` | Still missing three helpers; preferred extraction path unimplemented |
+| D: batch crop classification | `batch_pipeline/` | All six scripts present; scene discovery implemented, preferred extraction unfinished |
 | E: full-field pixel preprocessing | Expected `scripts/build_fullfield_pixel_training_table.py` | Script still absent; raw export and reference inputs now present |
 | F: pixel models/redistribution | `scripts/` plus package modeling modules | Implementations and prepared 2021–2023 table present |
 | G: yield-potential index | `src/yield_prediction/yield_index.py` | Relative index calculation present; requires C-format export |
@@ -82,23 +82,33 @@ this restored exporter are separate from D's optical-only feature policy.
 
 ## D. Batch crop classification (still incomplete)
 
-Present: config, `prepare_crop_classification_batches.py`,
-`run_crop_classification_batch.py`, and `train_one_vs_rest_crop_models.py`.
+Present: config and all six scripts: preparation, shared batch utilities, CDSE
+utilities, scene-manifest builder, combined runner and binary classifier.
 
-Still absent:
+The intended sequence is prepare batches → discover scenes → extract labels and
+features → train binary crop classifiers. The scene builder writes candidate
+metadata and download URLs, not raster data or predictors. The runner does not
+consume that manifest, and preferred CDSE extraction raises `NotImplementedError`.
+The legacy Sentinel Hub Statistics route also lacks required settings in the
+supplied config; local AAFC label paths are blank.
+The current `.venv` also lacks `requests`, which blocks manifest-builder and
+runner imports until installed; it is listed in `requirements.txt`.
 
-- `batch_pipeline/quarter_section_batch_utils.py`
-- `batch_pipeline/copernicus_data_space_utils.py`
-- `batch_pipeline/build_copernicus_scene_manifest.py`
+The newly copied config and preparation default refer to the former
+`quarter_sections.geojson` location. The actual supplied geometry is
+`data/raw/alberta_quarter_sections.geojson`. Set config `geojson.path` to
+`../data/raw/alberta_quarter_sections.geojson` (relative to `batch_pipeline/`),
+and supply preparation's separate `--geojson data/raw/alberta_quarter_sections.geojson`
+argument from `crop-yield/`.
 
-The preparation script and JSON config now reference the supplied geometry in
-`data/raw/`. The intended sequence remains prepare batches → discover scenes →
-extract labels/features → train binary crop classifiers. Do not treat it as an
-end-to-end runnable command chain: the runner imports absent utilities and its
-preferred CDSE extraction raises `NotImplementedError`. The legacy Sentinel Hub
-Statistics route also lacks required settings in the supplied config.
+The trainer can evaluate completed feature tables, but selection currently uses
+held-out labels before cross-validation, parcel/year grouping does not hold out
+entire fields across years, and no fitted inference model is saved. Restored
+source does not establish completed extraction or trustworthy model scores.
 
-See [batch_pipeline/README.md](../batch_pipeline/README.md).
+See [batch_pipeline/README.md](../batch_pipeline/README.md) for command paths and
+[SCRIPT_GUIDE.md](SCRIPT_GUIDE.md#d-batch-crop-classification-inside-the-yield-project)
+for the detailed process of each script.
 
 ## E. Full-field monthly pixel preprocessing (script still missing)
 

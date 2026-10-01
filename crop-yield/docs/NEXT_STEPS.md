@@ -1,12 +1,12 @@
 # Crop yield: next steps with the harvest records
 
-Prepared 2026-09-29 from the current source and [harvest-data inspection](../../harvest-data/README.md). Unchecked steps below are proposed work, not implemented features.
+Updated 2026-10-01 from the current source and [harvest-data inspection](../../harvest-data/README.md). Unchecked steps below are proposed work, not implemented features.
 
 ## Objective and current position
 
 Build a model that predicts a farm field's yield from information available by a defined date. Start at field/crop/year resolution because that is the scale of the supplied observations. The 206 harvest operations cover 2020–2025, with mixed crops and units; they are not 206 verified independent training examples yet.
 
-The additional transfer restored the ATS downloader, Earth Engine exporter, yield-potential index and both pixel-training functions, plus geometry, a monthly raw export and two reference tables. Pixel wrappers now use the supplied prepared table. The historical benchmark uses a different dataset/schema and its restored implementation uses random splits. The full-field preprocessor and three batch helpers remain missing; direct CDSE extraction remains unimplemented. No existing script imports the harvest Excel reports. See [the pipeline guide](PIPELINE_GUIDE.md) for the current A–G workflow map.
+The additional transfer restored the ATS downloader, Earth Engine exporter, yield-potential index and both pixel-training functions, plus geometry, a monthly raw export and two reference tables. Pixel wrappers now use the supplied prepared table. The historical benchmark uses a different dataset/schema and its restored implementation uses random splits. All six batch scripts are now present, including scene discovery. The full-field preprocessor remains missing; direct CDSE feature extraction remains unimplemented, and the copied batch config/default still refers to the former geometry location. See [the batch README](../batch_pipeline/README.md) for that separate crop-classification workflow and its next steps. No existing script imports the harvest Excel reports. See [the pipeline guide](PIPELINE_GUIDE.md) for the current A–G workflow map.
 
 ## 1. Import and audit the six workbooks
 

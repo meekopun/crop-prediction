@@ -120,10 +120,13 @@ previous chronological implementation, not from the restored random-split CLI.
 ### Remaining incomplete Alberta workflows
 
 The current `docs/PIPELINE_GUIDE.md` records workflows A–G and current availability.
-Only the full-field preprocessor and the three batch files
-`batch_pipeline/{quarter_section_batch_utils,copernicus_data_space_utils,build_copernicus_scene_manifest}.py`
-remain absent among the documented source. The preferred direct-CDSE extraction
-branch remains unimplemented. New harvest Excel import/field matching is separate
+Only `scripts/build_fullfield_pixel_training_table.py` remains absent among the
+documented source. All six batch scripts, including shared/CDSE utilities and the
+scene-manifest builder, are present. The manifest contains discovery metadata;
+the preferred direct-CDSE feature extraction branch remains unimplemented. The
+newly copied batch config/preparation default points to the former geometry path;
+see `batch_pipeline/README.md` for the current path and override. New harvest
+Excel import/field matching is separate
 work; supplied 2021–2023 reference CSVs do not imply that integration is done.
 
 ### What the surviving code does

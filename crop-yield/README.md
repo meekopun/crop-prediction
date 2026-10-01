@@ -88,8 +88,9 @@ field yield. See [reference input inventory](reference_inputs/README.md).
   Existing local geometry is `data/raw/alberta_quarter_sections.geojson`; do not
   rerun a download merely to reorganize it.
 - C: [gee/README.md](gee/README.md) explains the restored Earth Engine exporter.
-- D: batch helper modules and the scene-manifest builder remain missing, and
-  direct Copernicus extraction remains unimplemented.
+- D: all six batch scripts are present, including the scene-manifest builder.
+  Direct Copernicus feature extraction remains unimplemented; copied geometry
+  paths need correction. See [the batch README](batch_pipeline/README.md).
 - E: the monthly export and observed-yield reference are present, but
   `scripts/build_fullfield_pixel_training_table.py` is still missing.
 - F: both pixel-training implementations and their prepared input are present.
