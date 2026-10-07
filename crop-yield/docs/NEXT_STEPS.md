@@ -6,14 +6,14 @@ Updated 2026-10-01 from the current source and [harvest-data inspection](../../h
 
 Build a model that predicts a farm field's yield from information available by a defined date. Start at field/crop/year resolution because that is the scale of the supplied observations. The 206 harvest operations cover 2020–2025, with mixed crops and units; they are not 206 verified independent training examples yet.
 
-The additional transfer restored the ATS downloader, Earth Engine exporter, yield-potential index and both pixel-training functions, plus geometry, a monthly raw export and two reference tables. Pixel wrappers now use the supplied prepared table. The historical benchmark uses a different dataset/schema and its restored implementation uses random splits. All six batch scripts are now present, including scene discovery. The full-field preprocessor remains missing; direct CDSE feature extraction remains unimplemented, and the copied batch config/default still refers to the former geometry location. See [the batch README](../batch_pipeline/README.md) for that separate crop-classification workflow and its next steps. No existing script imports the harvest Excel reports. See [the pipeline guide](PIPELINE_GUIDE.md) for the current A–G workflow map.
+The additional transfer restored the ATS downloader, Earth Engine exporter, yield-potential index and both pixel-training functions, plus geometry, a monthly raw export and two reference tables. Pixel wrappers now use the supplied prepared table. The historical benchmark uses a different dataset/schema and its restored implementation uses random splits. All six batch scripts are now present, including scene discovery. The full-field preprocessor remains missing; direct CDSE feature extraction remains unimplemented, and the copied batch config/default still refers to the former geometry location. See [the batch README](../batch_pipeline/README.md) for that separate crop-classification workflow and its next steps. `scripts/import_harvest_data.py` now stages the harvest Excel observations and review flags; they are not yet joined to training features. See [the pipeline guide](PIPELINE_GUIDE.md) for the current A–G workflow map.
 
 ## 1. Import and audit the six workbooks
 
-- [ ] Implement a read-only `.xls` importer that carries field headings across page breaks, joins wrapped text/units and ignores repeated report headers and timestamps.
-- [ ] Produce a proposed `data/processed/harvest/operations.csv` with the data contract in the harvest assessment, plus an exceptions report.
-- [ ] Reconcile the operation counts: 25, 32, 36, 36, 36 and 41 for 2020–2025 respectively.
-- [ ] Check positive harvested areas, dates against operation year, rate/total units, and area × rate versus total, allowing source rounding.
+- [x] Implement a read-only `.xls` importer that carries field headings across page breaks, joins wrapped text/units and ignores repeated report headers and timestamps.
+- [x] Produce `data/processed/harvest/operations.csv` with source coordinates and explicit units, plus `exceptions.csv` and `summary.json`.
+- [x] Reconcile the operation counts: 25, 32, 36, 36, 36 and 41 for 2020–2025 respectively.
+- [x] Check positive harvested areas, dates against operation year, rate/total units, and area × rate versus total, allowing source rounding.
 - [ ] Preserve repeated operations. Review the mixed-crop headings at 2022 `Sheet1!A62:M64` and 2023 `Sheet1!A118:M120` rather than dropping them as duplicates.
 
 **Completion evidence:** every output record has source coordinates; 206 operations are accounted for as included or flagged; no unparsed unit is silently treated as a number.
@@ -21,7 +21,7 @@ The additional transfer restored the ATS downloader, Earth Engine exporter, yiel
 ## 2. Review crop identities and target units
 
 - [ ] Maintain a crop/variety mapping table, keeping original text.
-- [ ] Confirm ambiguous variety-only entries, particularly the 2025 `DK 902 TF 2025 (Round up Ready)` label.
+- [x] Confirm the 2025 `DK 902 TF 2025 (Round up Ready)` label as canola: user confirmation on 2026-10-06, saved in `config/harvest_review.json`.
 - [ ] Choose initial crops based on the number of usable independent fields and years after geometry matching. Oats, barley, wheat and confirmed canola/pea records are candidates, not an automatic inclusion list.
 - [ ] Use one consistent yield unit per crop for the first benchmark. Keep the 34 `lb/ac` operations separate from the 172 `bu/ac` operations unless a reviewed conversion is applied.
 - [ ] Verify whether reported rates are measured, calculated, estimated, or adjusted for moisture. Arithmetic agreement with total does not resolve that question.
@@ -29,6 +29,11 @@ The additional transfer restored the ATS downloader, Earth Engine exporter, yiel
 **Completion evidence:** each training target has a reviewed crop, unit and measurement meaning; unsupported or ambiguous records remain traceable outside the pilot.
 
 ## 3. Match records to actual harvested boundaries
+
+The user temporarily excluded the six name-only operations and four mixed-crop
+operations on 2026-10-06. Their operation IDs and reasons are saved in
+`config/harvest_review.json`; all remain traceable in `operations.csv`. The 196
+remaining processing candidates still need verified harvested footprints.
 
 - [ ] Build a stable farm-field registry with geometry and aliases across years.
 - [ ] Parse quarter- and half-section descriptions and look up candidate geometries from the supplied `data/raw/alberta_quarter_sections.geojson` (the classification project also retains its own source geometry).

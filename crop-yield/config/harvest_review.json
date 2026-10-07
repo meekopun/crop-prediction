@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "reviewed_by": "user",
+  "reviewed_on": "2026-10-06",
+  "crop_aliases": {
+    "DK 902 TF 2025 (Round up Ready)": "canola"
+  },
+  "excluded_operations": {
+    "4c0847a3ef371e3399c9": "Name-only field: Youngs; awaiting field boundary.",
+    "a846922719d2e4160ae9": "Name-only field: Rick Collins; awaiting field boundary.",
+    "f4a1396464f539964e84": "Name-only field: Youngs; awaiting field boundary.",
+    "9eaf95e44860802dbf32": "Name-only field: Rick Collins; awaiting field boundary.",
+    "fb172c66e77289c225df": "Name-only field: Rick Collins; awaiting field boundary.",
+    "0ec8cac709e35c7139a3": "Name-only field: Ron Jones; awaiting field boundary.",
+    "419670724792ad125417": "D+N, 2022: awaiting separate crop-area confirmation.",
+    "dab527352bf8bbc3043a": "D+N, 2022: awaiting separate crop-area confirmation.",
+    "68ba1cd7306f8c781365": "S35 (GRAWS), 2023: awaiting separate crop-area confirmation.",
+    "b0c92a18017e0bd10abe": "S35 (GRAWS), 2023: awaiting separate crop-area confirmation."
+  }
+}

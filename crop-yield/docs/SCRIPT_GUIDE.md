@@ -4,6 +4,31 @@ Updated 2026-10-01 for the newly supplied batch helpers and scene-manifest build
 `crop-yield/`. Run local commands from that directory after editable installation.
 The [pipeline guide](PIPELINE_GUIDE.md) is the execution/status map.
 
+## Harvest report import
+
+### `src/yield_prediction/harvest.py`
+
+Reads `Sheet1` from the farm's `.xls` report layout using optional `xlrd`.
+Tracks field headings across pages, joins continuation cells, parses explicit
+numbers/units and harvest dates, recognizes explicit crop names, and retains
+source rows and original text. Keeps each operation separate and flags invalid
+measurements, date/unit/total conflicts, unknown crops, name-only fields and
+multiple operations sharing a field/year. No unit conversion or geometry matching
+occurs; every record starts excluded from the pilot. `src/harvest.py` re-exports
+the parser functions for compatibility with the original stub location.
+
+### `scripts/import_harvest_data.py`
+
+Accepts `--input-dir`, `--output-dir`, `--review-file` and `--no-review`. Defaults
+resolve from the source location, not the working directory. Applies
+`config/harvest_review.json` by default: the user's canola confirmation and ten
+temporary operation exclusions. All 206 records remain in `operations.csv`;
+`processing_candidates.csv` contains 196 pending boundary review. Also writes
+`exceptions.csv` and `summary.json` under `data/processed/harvest/`. Re-running
+replaces these staging files. Exit codes are 0 on success (warnings allowed),
+1 on file/dependency/layout failure, and 2 when written output contains errors.
+Install the dependency with `pip install -e '.[harvest]'`.
+
 ## A. Historical workflow
 
 ### `src/yield_prediction/data.py`
@@ -525,13 +550,16 @@ to run independently of that missing preprocessing step.
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `tests/test_data.py`     | Check default bundled path, dataset coverage and restored record conversions                                       |
 | `tests/test_cli.py`      | Check summary, default path from another working directory, and missing-ML error                                   |
+| `tests/test_harvest.py` | Check page breaks, wrapped values, units, validation failures, staging exports and local report reconciliation |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs and a small restored historical benchmark |
 | `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
 | `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |
 
 
-Eight tests cover local package behavior. They do not validate live downloads,
-Earth Engine execution, original harvest import, or the incomplete CDSE extraction route.
+Tests cover local package behavior and harvest import. Actual farm-workbook
+checks require the local reports and optional `xlrd`; synthetic parser checks
+run without Excel dependencies. Tests do not validate live downloads,
+Earth Engine execution or the incomplete CDSE extraction route.
 
 ## What remains absent
 

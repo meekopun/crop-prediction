@@ -26,7 +26,8 @@ crop-yield/
 ```
 
 The original harvest workbooks stay at repository-level `harvest-data/` because
-both projects can use them. They are not yet imported into this pipeline.
+both projects can use them. The harvest importer stages their operation records
+for review; joining them to field boundaries and satellite predictors is still pending.
 
 ## Setup
 
@@ -43,6 +44,48 @@ as needed. For extraction dependencies, also install `requirements.txt`.
 `pip install -e .` alone supports the historical summary and standard-library
 module commands; model execution requires ML extras. External extraction needs
 its service credentials and setup.
+
+## Import harvest reports
+
+From `crop-yield/`, with its environment activated:
+
+```bash
+python -m pip install -e '.[harvest]'
+python scripts/import_harvest_data.py
+# Optional overrides:
+python scripts/import_harvest_data.py --input-dir ../harvest-data --output-dir data/processed/harvest
+```
+
+`src/yield_prediction/harvest.py` parses `Sheet1` in the printed `.xls` reports.
+The launcher defaults to the repository's harvest folder regardless of working
+directory. It preserves headings across pages, joins wrapped text/units, and
+writes `operations.csv`, `processing_candidates.csv`, `exceptions.csv` and
+`summary.json`. Re-running replaces these staging outputs. Saved decisions live
+separately in `config/harvest_review.json` and are applied automatically by the
+launcher. `--review-file PATH` selects another review file; `--no-review` skips
+farm-specific decisions, for example when importing unrelated reports. Exclusion
+IDs absent from an import cause a failure before writing outputs, so changed
+source filenames or rows cannot silently invalidate the saved decisions.
+
+Operations retain source rows, original measurements and explicit yield units.
+Crop names are recognized when explicitly present or confirmed in the review
+file. On 2026-10-06 the user confirmed `DK 902 TF 2025 (Round up Ready)` as canola.
+The six name-only operations and four operations in the two mixed-crop field/year
+groups are temporarily excluded by operation ID, with reasons retained in
+`operations.csv`. The candidate file contains the remaining 196 observations.
+All geometry is unmatched and `included_in_pilot` starts false; candidates still
+need boundary review and matching satellite features before training.
+The parser flags missing/invalid measurements, inconsistent dates/totals and
+multiple operations under one field/year. It does not convert units or aggregate
+operations. `qa_flags` is a pipe-separated list in the CSV. Workbook diagnostics
+appear in the exceptions file with `source_row=0`; operation rows are one-based.
+Operation IDs are stable for unchanged source filenames, sheet names and row
+positions. A legal description is a candidate identity, not a verified boundary.
+
+The local six-workbook check reconciles 206 operations: 172 `bu/ac`, 34 `lb/ac`.
+Exit codes: 0 for a completed import with no errors (review warnings may remain),
+1 for a file/dependency/layout failure, 2 for completed output containing errors.
+Workbook/layout failures abort before output files are written.
 
 ## Run the restored historical workflow
 

@@ -19,8 +19,9 @@ installed, or use `PYTHONPATH=src` for Python module/script calls.
 A is an independent historical example. B supplies geometry for extraction.
 C and D are alternative feature routes with different schemas. E prepares the
 monthly full-field export for F; the supplied prepared reference table lets F
-run without regenerating E. G consumes C's seasonal polygon table. None of these
-paths currently imports the 2020–2025 harvest Excel workbooks automatically.
+run without regenerating E. G consumes C's seasonal polygon table. The separate
+`scripts/import_harvest_data.py` stages the 2020–2025 harvest observations;
+their integration with these modeling paths still needs field/satellite matching.
 
 ## A. Historical dataset and benchmark
 
@@ -167,8 +168,10 @@ bushels/acre and learns no relationship to observed harvest yields.
 ## Shared harvest integration and dependencies
 
 The separate `../harvest-data/` reports remain original inputs for both projects.
-Their import, unit normalization and field-boundary matching are future work in
-[NEXT_STEPS.md](NEXT_STEPS.md).
+`scripts/import_harvest_data.py` now imports operations into `data/processed/harvest/`
+with explicit units and an exceptions report. Crop/unit review and field-boundary
+matching remain in [NEXT_STEPS.md](NEXT_STEPS.md); no unit conversion or automatic
+model integration is performed.
 
 `pyproject.toml` installs the package and optional ML dependencies;
 `requirements.txt` adds geospatial/network tools. Dependencies cannot replace
