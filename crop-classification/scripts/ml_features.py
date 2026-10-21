@@ -27,6 +27,9 @@ S2_PREFIXES = {
 }
 S1_PREFIXES = {"VV", "VH", "VV_minus_VH"}
 PRECIP_PREFIXES = {"PRECIP"}
+# Sentinel-2 scene-classification codes are cloud/land-cover QA metadata, not
+# crop measurements. Training drops them before deriving temporal features.
+QA_PREFIXES = {"SCL"}
 
 
 def filter_columns_by_months(df, months, exclude_cols=None):
@@ -105,6 +108,19 @@ def signal_base_name(column):
         if month in MONTH_ORDER:
             return base
     return column
+
+
+def drop_qa_columns(df, exclude_cols=None):
+    """
+    Remove QA signals such as SCL_jul, keeping excluded metadata columns.
+    """
+    exclude_cols = set(exclude_cols or [])
+    keep = [
+        col
+        for col in df.columns
+        if col in exclude_cols or signal_base_name(col) not in QA_PREFIXES
+    ]
+    return df[keep].copy()
 
 
 def infer_feature_family(column):

@@ -1,6 +1,6 @@
 # Crop classification: script-by-script process
 
-Source reviewed 2026-09-29. Paths in code spans are relative to `crop-classification/`. Commands normally run from that directory in its Python environment. This guide describes the existing implementation; proposed fixes are in [NEXT_STEPS.md](NEXT_STEPS.md).
+Source reviewed 2026-09-29; sections for `04`–`07` and `ml_features.py` updated 2026-10-07 for the step-1 evaluation changes. Paths in code spans are relative to `crop-classification/`. Commands normally run from that directory in its Python environment. This guide describes the existing implementation; proposed fixes are in [NEXT_STEPS.md](NEXT_STEPS.md).
 
 ## What the model learns
 
@@ -101,25 +101,30 @@ The pixel exporter with `--include-labels` obtains labels itself, so the separat
 
 **Input:** polygon feature CSV and label CSV.
 
-**Process:** remove export metadata `system:index`/`.geo` from features; require `pid`; inner-join labels and features on `pid`; drop rows containing any missing value; print class counts.
+**Process:** remove export metadata `system:index`/`.geo` from features; require `pid`; inner-join labels and features on `pid`. Then handle missing values:
+
+- By default, drop rows containing any missing value.
+- With `--keep-missing`, keep rows with partly missing features as NaN. Drop only rows missing every feature or any label field.
+
+Either way, print the dropped rows by crop and the class counts.
 
 **Output:** `data/training_table.csv` by default.
 
 **Model role:** creates paired predictor/target examples suitable for training.
 
-**Limits:** does not validate one-to-one keys, preserve/validate year matching, or report missing-value losses separately. Duplicate keys can multiply observations. It is not ready to combine multi-year harvest records solely by `pid`.
+**Limits:** does not validate one-to-one keys or preserve/validate year matching. Duplicate keys can multiply observations. It is not ready to combine multi-year harvest records solely by `pid`. Missing CHIRPS precipitation north of 50°N marks location; with `--keep-missing`, exclude the `precip` family when training.
 
 ### `scripts/ml_features.py`
 
 **Input:** feature dataframe, requested months/families, and metadata exclusion set supplied by the caller.
 
-**Process:** select month-suffixed columns; optionally derive differences between consecutive available selected months, seasonal maximum, minimum and range; classify signal names into `s2`, `s1`, `precip` or `other`; filter by requested families.
+**Process:** drop QA signals (`QA_PREFIXES`, currently `SCL`) when the caller asks; select month-suffixed columns; optionally derive differences between consecutive available selected months, seasonal maximum, minimum and range; classify signal names into `s2`, `s1`, `precip` or `other`; filter by requested families.
 
 **Output:** transformed dataframe used by training and prediction; no standalone file or CLI.
 
 **Model role:** exposes seasonal growth and decline patterns. A change in NDVI between June and July may help separate crops even when one month's value is similar.
 
-**Limits:** these transformations are per row; they do not learn fitted parameters. Feature timing still matters for forecasts. Column retention uses naming rules—do not assume arbitrary new metadata survives filtering or is excluded from modeling. SCL is categorized as `other`.
+**Limits:** these transformations are per row; they do not learn fitted parameters. Feature timing still matters for forecasts. Column retention uses naming rules—do not assume arbitrary new metadata survives filtering or is excluded from modeling. Training drops SCL. Models trained before 2026-10-07 used SCL, and prediction still rebuilds it for them.
 
 ### `scripts/05_train_decision_tree.py`
 
@@ -129,25 +134,25 @@ Despite its name, this trains four model families.
 
 **Process:**
 
-1. Filter months (default April–October), add temporal features by default, and filter feature families.
-2. Remove its explicit non-feature columns: IDs, target, AAFC code, export metadata and AAFC purity/count. Convert remaining columns to numeric; reject missing or invalid values.
-3. Construct a balanced decision tree, standardized logistic-regression pipeline, CatBoost classifier, or LightGBM classifier. Decision trees split feature thresholds; logistic regression combines weighted standardized inputs; boosting models combine many trees.
-4. For `multiclass`, learn the crop label directly. For `one-vs-rest`, repeat training for each configured target crop against `other`.
-5. Split off a holdout (default 25%). The default is random stratified splitting. `grouped` uses `GroupShuffleSplit` on the first six characters of `pid` by default.
-6. Fit on the training portion, predict the holdout, and calculate class precision, recall, F1 and accuracy. Separately run default five-fold cross-validation over the full supplied dataset; grouped mode uses `GroupKFold`.
+1. Drop SCL QA columns. Filter months (default April–October), add temporal features by default, and filter feature families.
+2. Remove its explicit non-feature columns: IDs, target, AAFC code, export metadata and AAFC purity/count. Convert remaining columns to numeric; reject non-numeric values. Keep missing values as NaN and print how many rows each feature family affects.
+3. Construct a balanced decision tree, logistic-regression pipeline (median imputation, standardization), CatBoost classifier, or LightGBM classifier. Decision trees split feature thresholds; logistic regression combines weighted standardized inputs; boosting models combine many trees. The tree models route NaN natively.
+4. Count distinct `pid`s per crop. For `multiclass`, drop rows of crops below `--min-class-fields` (default 10) and learn the crop label directly. For `one-vs-rest`, skip those crops, train each remaining crop against `other`, and write `one_vs_rest.json` listing trained and skipped crops.
+5. Split off a holdout (default 25%). The default is now `grouped`: `GroupShuffleSplit` on `pid[:6]` (meridian + range + township). `random` uses stratified row splitting.
+6. Fit on the training portion, predict the holdout, and calculate class precision, recall, F1 and accuracy. Separately run repeated cross-validation over the full supplied dataset: `--cv-folds` (5) × `--cv-repeats` (3). Grouped mode uses `StratifiedGroupKFold` on the same township groups; random mode uses `StratifiedKFold`. Each fold reports accuracy, macro-F1 (over classes present in that fold) and per-class F1. The first repeat's out-of-fold predictions give a pooled report and confusion matrix. When a `pid` has several rows (pixel tables), the holdout and every fold also report field-level scores: average each pid's row probabilities, then take the top class. The true field label is the majority pixel label.
 7. Save the fitted holdout-training model, preprocessing metadata, reports and diagnostic graphics.
 
-**Output:** `models/<model_type>/` or `models/<model_type>_one_vs_rest/<crop>/`, containing `model.joblib`, `metrics.txt`, `metrics.json`, `confusion_matrix.png`, and `feature_importances.json`. Decision trees also produce rules and a tree plot.
+**Output:** `--output-dir`, defaulting to `models/<model_type>/` or `models/<model_type>_one_vs_rest/<crop>/`. Each directory contains `model.joblib`, `metrics.txt`, `metrics.json`, `confusion_matrix.png` (holdout), `cv_confusion_matrix.png` (out-of-fold), and `feature_importances.json`. Decision trees also produce rules and a tree plot. `metrics.json` keeps the earlier keys and adds `cv` (fold summaries and out-of-fold reports), `data` (input, rows, fields, groups, class counts), `settings` and `skipped_classes`.
 
-**Model role:** this is the core learning/evaluation step. Saved bundles include required feature order, months, temporal settings, family selection and group settings so inference can rebuild inputs.
+**Model role:** this is the core learning/evaluation step. Saved bundles include required feature order, months, temporal settings, family selection, group settings and input path so inference can rebuild inputs.
 
-**Limits:** saved models are not refit on all rows after the holdout evaluation. Cross-validation and holdout are separate evaluations; the CV uses all supplied rows. Training output directories are fixed and reruns overwrite files. `metrics.json` omits some provenance present in the bundle. One-vs-rest requires positive examples for each intended crop. A large pixel count does not imply many independent fields. Harvest metadata/targets require additional exclusions before they are added to these inputs.
+**Limits:** saved models are not refit on all rows after the holdout evaluation. Cross-validation and holdout are separate evaluations; the CV uses all supplied rows. The script refuses to write into a non-empty output directory unless `--overwrite` is given. With `--overwrite`, older crop subdirectories not listed in the manifest stay on disk but prediction ignores them. A large pixel count does not imply many independent fields. Harvest metadata/targets require additional exclusions before they are added to these inputs.
 
 ### `scripts/06_predict.py`
 
 **Input:** a saved bundle or a directory of one-vs-rest bundles, plus new feature CSV.
 
-**Process:** load each model; reconstruct month selection and temporal features; select saved feature columns in order; reject missing/non-numeric features. For a single model, output its class prediction and class probabilities. For one-vs-rest, collect each crop's positive-class probability and choose the largest.
+**Process:** load each model; reconstruct month selection and temporal features; select saved feature columns in order; reject non-numeric features and pass missing values as NaN. For a single model, output its class prediction and class probabilities. For one-vs-rest, load the crops listed in `one_vs_rest.json`; older directories have no manifest, so load every crop subdirectory. Skip models that never saw their crop, then choose the crop with the largest positive-class probability.
 
 **Output:** `data/predictions.csv` or `--output`, with `pid` when available, `predicted_crop`, and `prob_<class>` columns.
 
@@ -159,13 +164,13 @@ Despite its name, this trains four model families.
 
 **Input:** one labeled table and two feature-family selections, defaults `s2` versus `s2,s1,precip`; default crops wheat/barley and grouped validation.
 
-**Process:** dynamically import the training script; prepare and evaluate one-vs-rest classifiers for each crop/family combination with the selected settings; extract positive-class precision, recall, F1, support and actual feature counts.
+**Process:** dynamically import the training script; prepare and evaluate one-vs-rest classifiers for each crop/family combination with the selected settings. Extract holdout precision, recall, F1 and support, plus mean ± std cross-validated F1 (and field-level CV F1 for pixel tables) and actual feature counts.
 
-**Output:** `data/feature_set_comparison.csv` and matching `.json` by default. Prints an F1 comparison and difference when there are two experiment columns.
+**Output:** `data/feature_set_comparison.csv` and matching `.json` by default. Prints a cross-validated F1 comparison with `cv_f1_delta` = augmented minus baseline.
 
 **Model role:** assesses whether extra inputs help distinguish specific crops. It does not save deployable model bundles.
 
-**Limits:** it filters existing columns; it cannot add radar/rainfall absent from the CSV. Check feature counts and identical row/group coverage. The printed difference is based on pivot-column order; inspect the experiment labels when interpreting its sign.
+**Limits:** it filters existing columns; it cannot add radar/rainfall absent from the CSV. It warns when both selections give a crop identical feature families, as with `s2` versus `s2,s1,precip` on the current pixel export. `--cv-repeats` (default 3) multiplies runtime on pixel tables.
 
 ### `scripts/merge_pixel_exports.py`
 

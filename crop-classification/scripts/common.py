@@ -37,6 +37,10 @@ AAFC_CODE_TO_CROP = {
 
 TARGET_CROPS = sorted(set(AAFC_CODE_TO_CROP.values()))
 
+# One-vs-rest training writes this file to list the crops it actually trained;
+# prediction ignores crop subdirectories that it does not list.
+OVR_MANIFEST = "one_vs_rest.json"
+
 # Sentinel-2 surface reflectance bands used for feature extraction.
 # Excludes B1 (aerosol), B9 (water vapor), B10 (cirrus, absent in SR product).
 S2_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]

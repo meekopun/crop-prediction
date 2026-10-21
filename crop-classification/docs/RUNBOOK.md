@@ -107,6 +107,20 @@ Primary output:
 
 - `data/training_table.csv`
 
+By default the join drops every row with any missing value. For the 2024
+export, that discarded 112 of 423 labeled fields: wheat 43, canola 28,
+barley 24, corn 10, peas 6 and alfalfa 1. Keep those rows as NaN instead:
+
+```bash
+python scripts/04_join_labels_features.py --keep-missing \
+  --output data/training_table_2024_with_missing.csv
+```
+
+Most gaps are cloudy April composites. The rest are missing CHIRPS
+precipitation: CHIRPS covers only 50°S–50°N, and all 139 sampled quarter
+sections north of 50°N lack it. Missing precipitation therefore identifies a
+location, not a crop. Train recovered tables with `--feature-families s2,s1`.
+
 ### Step 5: train models
 
 Examples:
@@ -116,30 +130,44 @@ python scripts/05_train_decision_tree.py \
   --model-type decision-tree \
   --mode multiclass \
   --max-depth 6 \
-  --split-strategy grouped
+  --output-dir models/decision_tree_v2
 
 python scripts/05_train_decision_tree.py \
   --model-type logistic-regression \
   --mode one-vs-rest \
-  --split-strategy grouped
+  --output-dir models/logistic_regression_one_vs_rest_v2
 
 python scripts/05_train_decision_tree.py \
-  --model-type catboost \
-  --mode one-vs-rest \
-  --split-strategy grouped
-
-python scripts/05_train_decision_tree.py \
+  --input data/training_table_2024_with_missing.csv \
   --model-type lightgbm \
-  --mode one-vs-rest \
-  --split-strategy grouped
+  --mode multiclass \
+  --feature-families s2,s1 \
+  --output-dir models/step1/C_polygon423_s2s1
 ```
 
-Typical outputs:
+Without `--output-dir`, outputs go to the old fixed directories, for example
+`models/lightgbm/` or `models/catboost_one_vs_rest/`. Training refuses to
+write into a directory that already holds a run unless you pass `--overwrite`.
 
-- `models/decision_tree/...`
-- `models/logistic_regression_one_vs_rest/...`
-- `models/catboost_one_vs_rest/...`
-- `models/lightgbm_one_vs_rest/...`
+Evaluation settings:
+
+- `--split-strategy grouped` is the default. It holds out whole townships
+  (`pid[:6]` = meridian + range + township).
+- `--cv-repeats 3` (default) runs 5-fold `StratifiedGroupKFold` three times
+  with reshuffled folds.
+- `--min-class-fields 10` (default) skips one-vs-rest crops labeled on fewer
+  than 10 distinct `pid`s. In multiclass mode it drops those crops' rows.
+- Sentinel-2 `SCL` columns are cloud-mask codes, so training drops them from
+  the inputs.
+- Missing feature values are allowed. LightGBM, CatBoost and decision trees
+  handle them natively; logistic regression imputes training-fold medians.
+
+Each run directory adds `cv_confusion_matrix.png` from out-of-fold
+predictions. `metrics.txt` and `metrics.json` report CV accuracy, macro-F1 and
+per-class F1 (mean ± std), plus input, row/field counts and settings. Pixel
+tables also get field-level scores, which average each `pid`'s pixel
+probabilities. One-vs-rest directories include `one_vs_rest.json`, which lists
+the trained and skipped crops.
 
 ### Step 6: run prediction
 
@@ -164,6 +192,11 @@ python scripts/06_predict.py \
 Primary output:
 
 - `data/predictions.csv`
+
+For one-vs-rest directories, prediction uses only the crops listed in
+`one_vs_rest.json`. Older directories have no manifest, so every crop
+subdirectory is used, except models that never saw their crop. One such
+example is `alfalfa` in `models/lightgbm_one_vs_rest/`.
 
 ## 3. Pixel-level preprocessing path
 
@@ -212,20 +245,30 @@ python scripts/05_train_decision_tree.py \
   --input data/sentinel2_pixel_samples.csv \
   --model-type lightgbm \
   --mode one-vs-rest \
-  --split-strategy grouped \
-  --months jun,jul,aug
+  --months jun,jul,aug \
+  --output-dir models/step1/D_pixel_ovr_junaug
 ```
+
+This took about 17 minutes on a laptop with the default three CV repeats. For a quicker
+check, pass `--cv-repeats 1`. Pixel scores are reported per pixel and per
+field; compare fields, not pixels, across runs.
 
 ### Compare feature families
 
 ```bash
 python scripts/07_compare_feature_sets.py \
-  --input data/sentinel2_pixel_samples.csv \
+  --input data/training_table_2024_with_missing.csv \
   --model-type lightgbm \
-  --split-strategy grouped \
   --baseline-families s2 \
-  --augmented-families s2,s1,precip
+  --augmented-families s2,s1 \
+  --crops wheat,barley,canola,alfalfa,peas,corn \
+  --output models/step1/feature_comparison_polygon423.csv
 ```
+
+The comparison uses mean cross-validated F1 for each crop. The current
+`data/sentinel2_pixel_samples.csv` contains only Sentinel-2 columns. Running
+`--augmented-families s2,s1,precip` against it compares identical features,
+and the script prints a warning when that happens.
 
 ## 4. Known runtime requirements and constraints
 
@@ -236,6 +279,9 @@ python scripts/07_compare_feature_sets.py \
 - Some workflows assume outputs are downloaded manually from Google Drive into
   `data/`.
 - Grouped splits in training depend on a `pid` column being present.
+- CHIRPS precipitation covers only up to 50°N. It is missing for the northern
+  edge of the Lethbridge box and unavailable for Peace-region fields such as
+  Beaverlodge (about 55°N).
 
 ## 5. Expanding to a different county or larger study area
 

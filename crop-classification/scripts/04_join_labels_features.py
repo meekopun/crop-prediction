@@ -4,6 +4,7 @@ labels (step 3) into one training table, keyed on quarter-section pid.
 
 Usage:
     python 04_join_labels_features.py
+    python 04_join_labels_features.py --keep-missing --output data/training_table_2024_with_missing.csv
 """
 import argparse
 
@@ -18,6 +19,12 @@ def main():
     parser.add_argument("--features", default=f"{DATA_DIR}/sentinel2_features.csv")
     parser.add_argument("--labels", default=f"{DATA_DIR}/aafc_labels.csv")
     parser.add_argument("--output", default=f"{DATA_DIR}/training_table.csv")
+    parser.add_argument(
+        "--keep-missing",
+        action="store_true",
+        help="Keep rows with some missing features (e.g. a cloudy month); drop only "
+        "rows missing every feature or any label field.",
+    )
     args = parser.parse_args()
 
     features = pd.read_csv(args.features)
@@ -42,7 +49,21 @@ def main():
         print(f"Dropped {dropped} quarter sections with no matching label "
               f"(cloud, non-target crop, or outside the AAFC clip).")
 
-    merged = merged.dropna(axis=0, how="any")
+    feature_cols = [c for c in features.columns if c != "pid"]
+    label_cols = [c for c in labels.columns if c != "pid"]
+    partial_missing = merged[feature_cols].isna().any(axis=1)
+    if args.keep_missing:
+        drop_mask = merged[feature_cols].isna().all(axis=1) | merged[label_cols].isna().any(axis=1)
+    else:
+        drop_mask = merged.isna().any(axis=1)
+    if drop_mask.any():
+        print(f"Dropped {int(drop_mask.sum())} rows with missing values, by crop:")
+        print(merged.loc[drop_mask, "crop_label"].value_counts().to_string())
+    kept_partial = int((partial_missing & ~drop_mask).sum())
+    if kept_partial:
+        print(f"Kept {kept_partial} rows with some missing features as NaN.")
+
+    merged = merged[~drop_mask]
     merged.to_csv(args.output, index=False)
     print(f"Wrote {len(merged)} labeled rows to {args.output}")
     print("Class distribution:")

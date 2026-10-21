@@ -39,11 +39,19 @@ python scripts/01_select_training_sample.py --n 1500                       # -> 
 python scripts/02_gee_sentinel_features.py --year 2024 --project GCP_ID    # -> Google Drive; download to data/sentinel2_features.csv
 python scripts/03_download_aafc_labels.py --year 2024 --min-purity 0.7     # -> data/aafc_labels.csv
 python scripts/04_join_labels_features.py                                  # -> data/training_table.csv
-python scripts/05_train_decision_tree.py --model-type lightgbm --mode one-vs-rest --split-strategy grouped
-python scripts/06_predict.py --model models/catboost_one_vs_rest --features data/sentinel2_features.csv
-python scripts/07_compare_feature_sets.py --input data/sentinel2_pixel_samples.csv --model-type lightgbm \
-    --baseline-families s2 --augmented-families s2,s1,precip
+python scripts/04_join_labels_features.py --keep-missing --output data/training_table_2024_with_missing.csv
+python scripts/05_train_decision_tree.py --input data/training_table_2024_with_missing.csv --model-type lightgbm \
+    --feature-families s2,s1 --output-dir models/step1/C_polygon423_s2s1
+python scripts/06_predict.py --model models/step1/C_polygon423_s2s1/model.joblib --features data/sentinel2_features.csv
+python scripts/07_compare_feature_sets.py --input data/training_table_2024_with_missing.csv --model-type lightgbm \
+    --baseline-families s2 --augmented-families s2,s1
 ```
+
+`sentinel2_pixel_samples.csv` holds Sentinel-2 columns only, so comparing
+`s2,s1,precip` on it compares identical features (07 warns). CHIRPS
+precipitation ends at 50°N: precip is NaN for every quarter section north of
+50°N, so with `--keep-missing` its missingness encodes location. Train
+recovered tables with `--feature-families s2,s1`.
 
 Step 2 exports to Drive by default and the CSV must be downloaded into `data/`
 manually before step 4. `data/training_table.csv` is tracked; `data/sentinel2_pixel_samples.csv` is a
@@ -69,13 +77,25 @@ without GEE access.
   and `--mode {multiclass,one-vs-rest}`. `07_compare_feature_sets.py` imports it
   by file path via `importlib` (the leading digit blocks a normal import) — keep
   its module-level functions importable.
-- **Grouped splits require a `pid` column.** `--split-strategy grouped` groups by
-  quarter-section id to stop pixels from one polygon straddling train/test. This
-  is the correct default for pixel-level data; random splits leak badly there.
-- Output layout per run: `models/<slug>/` for multiclass, `models/<slug>_one_vs_rest/<crop>/`
-  for one-vs-rest, each containing `model.joblib`, `metrics.{txt,json}`,
-  `confusion_matrix.png`, `feature_importances.json` (+ tree plots for decision trees).
-  `06_predict.py` accepts either a `model.joblib` path or a one-vs-rest directory.
+- **Grouped splits require a `pid` column.** `--split-strategy grouped` (the
+  default) groups by `pid[:6]` = meridian + range + township, so whole townships
+  are held out. Random splits leak badly for pixel tables. CV is
+  `StratifiedGroupKFold` × `--cv-repeats` (default 3), reporting accuracy,
+  macro-F1 and per-class F1. Pixel tables (many rows per `pid`) also get
+  field-level scores from averaging each pid's probabilities.
+- `--min-class-fields` (default 10 distinct pids) skips rare one-vs-rest crops
+  or drops their rows in multiclass. Training drops QA signals (`QA_PREFIXES`
+  = `SCL`) and keeps missing features as NaN; logistic regression imputes
+  medians inside its pipeline.
+- Output layout per run: `--output-dir`, defaulting to `models/<slug>/` for
+  multiclass and `models/<slug>_one_vs_rest/<crop>/` for one-vs-rest. Each
+  contains `model.joblib`, `metrics.{txt,json}`, `confusion_matrix.png`
+  (holdout), `cv_confusion_matrix.png` (out-of-fold) and
+  `feature_importances.json` (+ tree plots for decision trees). Training refuses
+  a non-empty output directory without `--overwrite`. One-vs-rest writes
+  `one_vs_rest.json` (`OVR_MANIFEST` in `common.py`) listing trained crops;
+  `06_predict.py` uses only those. It accepts either a `model.joblib` path or a
+  one-vs-rest directory.
 - CatBoost and LightGBM are imported in a `try/except ImportError` and only fail
   when their `--model-type` is selected.
 
