@@ -35,21 +35,36 @@ operations on 2026-10-06. Their operation IDs and reasons are saved in
 `config/harvest_review.json`; all remain traceable in `operations.csv`. The 196
 remaining processing candidates still need verified harvested footprints.
 
+On 2026-10-22 `scripts/match_harvest_boundaries.py` matched all 196 candidates to
+41 ATS quarter sections (half sections become two quarters). 39 operations share
+a quarter-year with another crop and 1 reports more acres than its quarter; the
+other 156 are eligible for a boundary pilot. 76 operations cover under half of
+their quarter, so quarter-wide satellite averages would mix in other land.
+
 - [ ] Build a stable farm-field registry with geometry and aliases across years.
-- [ ] Parse quarter- and half-section descriptions and look up candidate geometries from the supplied `data/raw/alberta_quarter_sections.geojson` (the classification project also retains its own source geometry).
-- [ ] Request mapped boundaries for name-only fields and subfields. Compare reported acres with the candidate polygon area, accounting for unused land and changing harvested area.
-- [ ] Resolve cases where one ATS parcel contains multiple fields/crops. Do not duplicate one yield onto several quarter sections as if they were independent observations.
-- [ ] Produce proposed `data/processed/harvest/field_boundaries.geojson` and a geometry-match report.
+- [x] Parse quarter- and half-section descriptions and look up candidate geometries from the supplied `data/raw/alberta_quarter_sections.geojson` (the classification project also retains its own source geometry).
+- [ ] Request mapped boundaries for name-only fields and subfields. Reported acres are now compared with the candidate polygon area (`area_fraction` and flags in `boundary_matches.csv`); unused land and changing harvested area still need review.
+- [ ] Resolve cases where one ATS parcel contains multiple fields/crops. They are flagged `shared_multiple_crops` and excluded from the pilot; same-crop sharing is flagged `shared_same_crop` and needs aggregation. Do not duplicate one yield onto several quarter sections as if they were independent observations.
+- [x] Produce proposed `data/processed/harvest/field_boundaries.geojson` and a geometry-match report (`boundary_matches.csv`, `boundary_match_summary.json`).
+- [ ] Restrict features to the reported crop within each quarter (for example with the AAFC crop inventory) where coverage is low.
 
 **Completion evidence:** every pilot target refers to a reviewed harvested footprint; unmatched or ambiguous cases are explicitly excluded. Do not use the Lethbridge study-area sample as the harvest geometry.
 
 ## 4. Build a small satellite feature pilot
 
+On 2026-10-22 `scripts/export_harvest_features.py` exported 163 pilot-eligible
+quarter-section years (2020–2025) to `data/processed/harvest/satellite/`. Every
+month has a cloud-free composite and Sentinel-1 values. The crop-inventory mask
+agrees with the farm records for canola (median 81% of the quarter), wheat (90%)
+and peas (74%), none under 10%. It mostly disagrees for oats and rye (median 0%;
+8 of 15 and 6 of 10 under 10%), and 7 of 25 barley quarter-years are under 10%.
+
 - [ ] Choose a small set of unambiguous fields and years, then define a prediction cutoff: whole-season retrospective estimate or a specific in-season forecast.
-- [ ] Choose the restored `gee/sentinel2_quarter_sections.js` route or adapt the classification polygon extractor to these field boundaries. The classification extractor requires `properties.pid`, creates monthly features, and assumes quarter-section identifiers; the restored GEE exporter has its own asset ID/year configuration. Keep a separate field-ID mapping if using it temporarily.
-- [ ] Export field-level optical/vegetation summaries for the correct seasons. Check cloud coverage, missing months and data availability before adding radar/weather features.
-- [ ] Check the geographic coverage of the precipitation source hard-coded in the classification extractors before reusing it for these fields. A requested export does not establish valid local rainfall coverage.
-- [ ] Preserve `field_id`, `year`, feature dates, feature units, valid-observation counts and extraction configuration. Join by reviewed field identity and year, with uniqueness checks.
+- [x] Adapt the classification polygon extractor to these field boundaries: `harvest_features.py` reuses its bands, indices, months and cloud mask, keyed by `pid` and year, and adds crop-inventory masking.
+- [x] Export field-level optical/vegetation summaries for the correct seasons, with per-month valid-pixel shares.
+- [x] Check the precipitation source: CHIRPS ends at 50°N, so no precipitation is exported for these ~55°N fields. Weather still needs another source (for example ERA5-Land).
+- [x] Preserve `pid`, `year`, operation IDs, valid-observation shares and extraction configuration (`harvest_features_manifest.json`).
+- [ ] Decide when to use crop-masked (`crop_*`) versus whole-quarter (`quarter_*`) features, using `aci_crop_fraction`; investigate the oats/rye disagreements.
 
 **Completion evidence:** a small joined table contains satellite predictors and independently supplied harvest targets for the same land and year, with no silent row multiplication. Then extend to all usable records.
 

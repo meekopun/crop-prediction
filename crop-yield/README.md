@@ -81,6 +81,32 @@ appear in the exceptions file with `source_row=0`; operation rows are one-based.
 Operation IDs are stable for unchanged source filenames, sheet names and row
 positions. A legal description is a candidate identity, not a verified boundary.
 
+Match the candidates to ATS quarter sections after importing:
+
+```bash
+python scripts/match_harvest_boundaries.py
+```
+
+It streams `data/raw/alberta_quarter_sections.geojson` and writes
+`field_boundaries.geojson` (one polygon per matched quarter, with `pid`),
+`boundary_matches.csv` (one row per candidate with match status, acreage share,
+quarter-year sharing and flags) and `boundary_match_summary.json` to
+`data/processed/harvest/`. Operations sharing a quarter-year with another crop,
+or reporting more acres than their quarter, are not pilot-eligible. A quarter
+section is a candidate boundary, not a surveyed farm field.
+
+Then export monthly Sentinel-2/Sentinel-1 features for the eligible quarters
+(needs `earthengine authenticate` once):
+
+```bash
+python scripts/export_harvest_features.py            # 2020–2025 by default
+python scripts/export_harvest_features.py --years 2024 --overwrite
+```
+
+It writes one CSV per year plus `harvest_satellite_features.csv` and a manifest to
+`data/processed/harvest/satellite/`, with whole-quarter (`quarter_*`) and
+crop-inventory-masked (`crop_*`) columns. Finished years are kept on rerun.
+
 The local six-workbook check reconciles 206 operations: 172 `bu/ac`, 34 `lb/ac`.
 Exit codes: 0 for a completed import with no errors (review warnings may remain),
 1 for a file/dependency/layout failure, 2 for completed output containing errors.

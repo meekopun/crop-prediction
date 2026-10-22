@@ -154,9 +154,13 @@ bushels/acre and learns no relationship to observed harvest yields.
 
 The separate `../harvest-data/` reports remain original inputs for both projects.
 `scripts/import_harvest_data.py` now imports operations into `data/processed/harvest/`
-with explicit units and an exceptions report. Crop/unit review and field-boundary
-matching remain in [NEXT_STEPS.md](NEXT_STEPS.md); no unit conversion or automatic
-model integration is performed.
+with explicit units and an exceptions report. `scripts/match_harvest_boundaries.py`
+then matches candidates to ATS quarter sections and writes `field_boundaries.geojson`
+plus a match report there. `scripts/export_harvest_features.py` exports monthly
+Earth Engine Sentinel-2/Sentinel-1 features for the eligible quarters to
+`data/processed/harvest/satellite/`. Crop/unit review, the field-yield table and
+model integration remain in [NEXT_STEPS.md](NEXT_STEPS.md); no unit conversion
+or yield aggregation is performed.
 
 `pyproject.toml` installs the package and optional ML dependencies;
 `requirements.txt` adds geospatial/network tools. Dependencies cannot replace

@@ -182,6 +182,15 @@ imply that integration is done.
   plus field-level `field_mae`/`field_r2`. Defaults reproduce the restored output.
   On the reference table `soil_moisture_am_mean` is one value per year; once it is
   dropped, no model beats the training-mean baseline.
+- Harvest flow: `scripts/import_harvest_data.py` → `data/processed/harvest/operations.csv`
+  → `scripts/match_harvest_boundaries.py` (`harvest_boundaries.py`) →
+  `field_boundaries.geojson` + `boundary_matches.csv`. Legal descriptions map to
+  ATS pids; the GeoJSON is streamed one feature per line. Quarter sharing counts
+  excluded operations too; `shared_multiple_crops` rows are not pilot-eligible.
+  → `scripts/export_harvest_features.py` (`harvest_features.py`, Earth Engine) →
+  `data/processed/harvest/satellite/harvest_satellite_features.csv`, one row per
+  eligible `(pid, year)` with `quarter_*` and AAFC-crop-masked `crop_*`
+  `<band>_<mon>` columns. No precipitation (CHIRPS ends at 50°N).
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 

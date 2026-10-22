@@ -30,6 +30,91 @@ replaces these staging files. Exit codes are 0 on success (warnings allowed),
 1 on file/dependency/layout failure, and 2 when written output contains errors.
 Install the dependency with `pip install -e '.[harvest]'`.
 
+### `src/yield_prediction/harvest_boundaries.py`
+
+**Input:** `operations.csv` from the importer and the province-wide
+`data/raw/alberta_quarter_sections.geojson`. Uses only the standard library.
+
+**Process:**
+
+1. Parse `legal_description_raw` (`SE 30-71-9 W6M`, compact forms such as
+  `NE12-71-10W6M`, `.` section separators, and `N1/2`/`S1/2` half sections) into
+   ATS `pid` values: meridian, two-digit range, three-digit township, two-digit
+   section, quarter code (SE 5, SW 6, NW 7, NE 8) and `00`.
+2. Stream the GeoJSON line by line, decoding only lines whose `pid` is wanted and
+  keeping the farmland quarter (`ra` null), not its road-allowance strips. The
+   file must have one feature per line, as GDAL writes it; otherwise it fails.
+3. For each `pending_boundary_review` operation, record whether every quarter was
+  found, approximate parcel acres and `area_fraction` (reported acres / parcel acres).
+4. Count every operation with a legal description, including excluded ones, per
+  quarter and year: `single_operation`, `shared_same_crop` or `shared_multiple_crops`.
+5. Mark `boundary_pilot_eligible` when matched, not shared with another crop and
+  not above 105% of the parcel. Flags also record `low_parcel_coverage` (under
+   half the parcel) and `quarter_year_area_exceeds_parcel`.
+
+**Output:** `field_boundaries.geojson` (one feature per matched quarter, with `pid`,
+ATS properties, `parcel_acres` and `boundary_source: ats_quarter_section`),
+`boundary_matches.csv` and `boundary_match_summary.json` under
+`data/processed/harvest/`. The boundary file's `pid` property suits the
+classification project's `scripts/02_gee_sentinel_features.py --input`.
+
+**Model role:** links yield targets to candidate land for satellite extraction. It
+fits no model and converts or aggregates no yields.
+
+**Limits:** a quarter section is not a surveyed field outline; fields can cover
+part of a quarter or cross into a neighbour. Same-crop operations sharing a
+quarter-year still need aggregation (total production / total area). Areas use a
+local equirectangular approximation of lon/lat coordinates.
+
+### `scripts/match_harvest_boundaries.py`
+
+Accepts `--operations`, `--geometry` and `--output-dir`, defaulting to the
+importer's output, the supplied geometry and `data/processed/harvest/`. Prints
+match, sharing and eligibility counts. Exit code 1 on file or format failure.
+On 2026-10-22 it matched all 196 candidates to 41 quarter sections in under two
+seconds; 156 are pilot-eligible.
+
+### `src/yield_prediction/harvest_features.py`
+
+**Input:** `boundary_matches.csv` and `field_boundaries.geojson`. Needs
+`earthengine-api` and a saved Earth Engine login; Earth Engine is imported lazily.
+
+**Process:**
+
+1. Build one unit per pilot-eligible `(pid, year)`. Eligible rows never share a
+  quarter-year with another crop, so each unit has one crop; a half section gives
+   a unit per quarter, and same-crop fields keep all their operation IDs.
+2. For each year, paint each quarter with its crop and compare against that year's
+  AAFC Annual Crop Inventory (`AAFC/ACI` `landcover`), using `CROP_ACI_CODES`
+   (wheat 140/145/146, forage-seed crops 122). This gives a per-pixel crop mask.
+3. For April–October, build monthly median composites: Sentinel-2 SR harmonized
+  (scenes under 60% cloudy pixels, SCL cloud/shadow masked, reflectance / 10000)
+   with NDVI, NDYI, GNDVI, NDRE, NDWI, EVI and SWIR ratio; Sentinel-1 IW VV/VH (dB)
+   and VV−VH. A fully masked placeholder keeps band names when a month has no scenes.
+4. Reduce means at 10 m over each quarter (`quarter_<band>_<mon>`), over its
+  crop-labelled pixels (`crop_<band>_<mon>`), plus `s2_valid_<mon>` and
+   `aci_crop_fraction`.
+
+**Output:** `harvest_features_<year>.csv` per year (kept on rerun unless
+`--overwrite`), combined `harvest_satellite_features.csv` (293 columns) and
+`harvest_features_manifest.json` with collections, thresholds and codes, under
+`data/processed/harvest/satellite/`.
+
+**Model role:** supplies predictors for the field-yield benchmark. It fits no
+model and carries no yield values; join targets by `pid`, `year` and operation IDs.
+
+**Limits:** no precipitation or weather (CHIRPS ends at 50°N). The crop mask is
+only as good as the inventory, which mostly disagrees with the farm records for
+oats and rye. Monthly medians smooth over within-month timing. Local `getInfo`
+suits these few dozen polygons per year, not province-wide runs.
+
+### `scripts/export_harvest_features.py`
+
+Accepts `--matches`, `--boundaries`, `--output-dir`, `--years` (default
+2020–2025), `--project`, `--scale` (10) and `--overwrite`. Exit code 1 if
+earthengine-api is missing or an export fails. On 2026-10-22 it exported 163
+quarter-section years in under a minute.
+
 ## A. Historical workflow
 
 ### `src/yield_prediction/data.py`
@@ -312,6 +397,8 @@ columns, including `aci_crop_code` and `year`.
 | `tests/test_data.py`     | Check default bundled path, dataset coverage and restored record conversions                                       |
 | `tests/test_cli.py`      | Check summary, default path from another working directory, and missing-ML error                                   |
 | `tests/test_harvest.py` | Check page breaks, wrapped values, units, validation failures, staging exports and local report reconciliation |
+| `tests/test_harvest_boundaries.py` | Check legal-description parsing, streaming lookup that skips road allowances, format rejection, quarter sharing and eligibility on a synthetic GeoJSON |
+| `tests/test_harvest_features.py` | Check feature units (half sections, same-crop grouping, conflicts, missing geometry), output columns and crop-inventory code coverage; Earth Engine calls are not tested |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs, year-constant feature removal, year split with baseline and a small restored historical benchmark |
 | `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
 | `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |
