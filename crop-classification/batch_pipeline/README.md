@@ -1,7 +1,7 @@
 # Crop classification batch pipeline
 
-Updated 2026-10-01 from the six Python files now present in this folder.
-This is workflow D in [the yield pipeline guide](../docs/PIPELINE_GUIDE.md).
+Moved from `crop-yield/batch_pipeline/` on 2026-10-22 with unchanged file contents.
+It is this project's third, incomplete workflow; see [the pipeline map](../docs/PIPELINE_GUIDE.md).
 It aims to classify **crop types** using AAFC labels and Sentinel-2 optical
 features. It does not predict harvest yield or import the harvest Excel reports.
 
@@ -22,7 +22,7 @@ contains scene metadata, not downloaded imagery or model-ready predictors.
 | [train_one_vs_rest_crop_models.py](train_one_vs_rest_crop_models.py) | Evaluates balanced logistic classifiers, one crop versus all others | Cross-validation probabilities and classification metrics |
 | [crop_classification_pipeline_config.json](crop_classification_pipeline_config.json) | Describes sources, crops, season, batching and output paths | Intended workflow settings; some are not enforced |
 
-See [SCRIPT_GUIDE.md](../docs/SCRIPT_GUIDE.md#d-batch-crop-classification-inside-the-yield-project)
+See [SCRIPT_GUIDE.md](../docs/SCRIPT_GUIDE.md#batch-pipeline-batch_pipeline)
 for each file's detailed process, controls, outputs and limitations.
 
 ## Intended flow and current gap
@@ -42,34 +42,32 @@ requires actual extraction. Training currently saves no fitted model bundle.
 
 ## Paths and prerequisites
 
-Commands below run from `/Users/meeko/Work/crop-prediction/crop-yield` using its
-existing `.venv`. The scripts are in `batch_pipeline/`; the old
-`upstream/crop_classification_batch_pipeline/` command paths no longer apply.
+Commands below run from `crop-classification/` in the environment created from
+its `requirements.txt`. The scripts are in `batch_pipeline/`; the former
+`crop-yield/batch_pipeline/` and `upstream/crop_classification_batch_pipeline/`
+command paths no longer apply.
 
-The actual geometry is `data/raw/alberta_quarter_sections.geojson`. The newly
-copied preparation default and JSON configuration refer to the former
-`quarter_sections.geojson` location. Before discovery/extraction, change the
-config's `geojson.path` to:
+Preparation's default geometry and the config's `geojson.path`
+(`../quarter_sections.geojson`, relative to `batch_pipeline/`) both resolve to
+`crop-classification/quarter_sections.geojson`. On the current machine that is a
+local, untracked symlink to `raw_data/quarter_sections.geojson`. Without it, pass
+`--geojson raw_data/quarter_sections.geojson` to preparation and set the config's
+`geojson.path` to:
 
 ```json
-"path": "../data/raw/alberta_quarter_sections.geojson"
+"path": "../raw_data/quarter_sections.geojson"
 ```
 
 Configured geometry/output paths resolve relative to `batch_pipeline/`, even
-with a config file saved elsewhere. Preparation has its own `--geojson` default,
-so also supply the explicit path in its command below. Keep the geometry order
-and road-allowance filtering unchanged once batches are planned.
+with a config file saved elsewhere. Preparation has its own `--geojson` default;
+changing the config does not change it. Keep the geometry order and
+road-allowance filtering unchanged once batches are planned.
 
 Dependencies vary by stage: preparation uses the standard library; batch helpers
 and manifest building need `pandas`, and CDSE helpers need `requests`; training
-also needs `numpy` and `scikit-learn`. Local AAFC raster sampling needs `rasterio`;
-GEE label sampling needs Earth Engine authentication and project access.
-
-The 2026-10-01 local check found `requests` missing from the existing `.venv`.
-Manifest building and the combined runner therefore fail even at `--help` until
-that dependency is installed. `requests` is listed in `requirements.txt`, but
-the package's `ml` extra does not include it. Preparation and trainer help checks
-passed; script syntax and documentation links were checked separately.
+also needs `numpy` and `scikit-learn`. All are in `requirements.txt`. Local AAFC
+raster sampling also needs `rasterio`, which is not listed; GEE label sampling
+needs Earth Engine authentication and project access.
 
 The CDSE client factory requires `CDSE_USERNAME` and `CDSE_PASSWORD` environment
 variables. Its search/product-lookup calls currently send no authorization header,
@@ -81,18 +79,18 @@ settings; service access was not validated by this documentation update.
 Prepare the plan and tracker:
 
 ```bash
-.venv/bin/python batch_pipeline/prepare_crop_classification_batches.py \
-  --geojson data/raw/alberta_quarter_sections.geojson
+python batch_pipeline/prepare_crop_classification_batches.py \
+  --geojson raw_data/quarter_sections.geojson
 ```
 
 Preparation overwrites the existing plan/tracker. Preserve progress before
 regenerating them. The streaming parser has a buffer-growth limitation described
 in the script guide; these commands are not evidence of a successful full-size run.
 
-After correcting `geojson.path`, prepare a scene manifest for one batch:
+Prepare a scene manifest for one batch:
 
 ```bash
-.venv/bin/python batch_pipeline/build_copernicus_scene_manifest.py \
+python batch_pipeline/build_copernicus_scene_manifest.py \
   --batch-id batch_01 --years 2021 2022 2023 --limit-per-week 8
 ```
 
@@ -103,7 +101,7 @@ returned candidates.
 Inspect the combined runner's available options:
 
 ```bash
-.venv/bin/python batch_pipeline/run_crop_classification_batch.py --help
+python batch_pipeline/run_crop_classification_batch.py --help
 ```
 
 Its default label route needs a populated `label_source.local_raster_pattern`.
@@ -117,7 +115,7 @@ lacks the Statistics endpoint.
 Once valid feature CSVs exist, the current trainer can be invoked with:
 
 ```bash
-.venv/bin/python batch_pipeline/train_one_vs_rest_crop_models.py \
+python batch_pipeline/train_one_vs_rest_crop_models.py \
   --batch-ids batch_01 --cv-splits 5 --top-features-per-crop 32
 ```
 
@@ -130,8 +128,9 @@ year can appear in a different fold.
 
 ## Next steps for this workflow
 
-- Correct the copied geometry config and preparation default, preserving batch
-  identity if a plan already exists.
+- Point the geometry config and preparation default at
+  `raw_data/quarter_sections.geojson` directly rather than the local symlink,
+  preserving batch identity if a plan already exists.
 - Check/fix the streaming parser and prevent concurrent tracker updates from
   overwriting one another before large batch runs.
 - Verify scene discovery on a small batch; add pagination, defined empty output
@@ -143,5 +142,5 @@ year can appear in a different fold.
   and evaluate explicit new-field and future-year holdouts.
 - Save a fitted preprocessing/model bundle and feature schema for inference.
 
-For harvest-yield work, follow [the yield next steps](../docs/NEXT_STEPS.md)
+For harvest-yield work, follow [the yield next steps](../../crop-yield/docs/NEXT_STEPS.md)
 instead; this classification route is a separate workflow.

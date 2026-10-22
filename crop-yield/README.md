@@ -15,8 +15,7 @@ crop-yield/
     pixel_yield.py      # F: known-yield NDVI redistribution
     yield_index.py      # G: relative yield-potential index
   gee/                  # C: Earth Engine Code Editor JavaScript and instructions
-  scripts/              # A/F: local launchers and pixel-model entry points
-  batch_pipeline/       # D: separate, still incomplete batch classification route
+  scripts/              # A/E/F: launchers, full-field builder, pixel-model entry points
   data/
     raw/                # Historical CSV, ATS geometry, untouched satellite exports
     processed/          # Generated metrics, predictions and index outputs
@@ -120,6 +119,8 @@ python scripts/estimate_pixel_yield_from_ndvi.py
 ```
 
 They write under `data/processed/` and accept `--input`/`--output-dir` overrides.
+`train_pixel_yield_models.py` also accepts `--baseline`, `--drop-year-constant`
+and `--split year` for a stricter evaluation against a training-mean baseline.
 The supplied table has 749 rows, eight field/crop/year groups and four crop labels.
 That supports local smoke runs but provides limited independent evaluation data.
 NDVI redistribution requires known field yield and does not predict an unknown
@@ -131,11 +132,11 @@ field yield. See [reference input inventory](reference_inputs/README.md).
   Existing local geometry is `data/raw/alberta_quarter_sections.geojson`; do not
   rerun a download merely to reorganize it.
 - C: [gee/README.md](gee/README.md) explains the restored Earth Engine exporter.
-- D: all six batch scripts are present, including the scene-manifest builder.
-  Direct Copernicus feature extraction remains unimplemented; copied geometry
-  paths need correction. See [the batch README](batch_pipeline/README.md).
-- E: the monthly export and observed-yield reference are present, but
-  `scripts/build_fullfield_pixel_training_table.py` is still missing.
+- D: the batch crop-classification route moved to
+  [crop-classification/batch_pipeline/](../crop-classification/batch_pipeline/README.md)
+  on 2026-10-22.
+- E: `python scripts/build_fullfield_pixel_training_table.py` rebuilds a pixel
+  table from the monthly export; it still yields only eight field-years.
 - F: both pixel-training implementations and their prepared input are present.
 - G: the relative index module is present; it needs the seasonal GEE export
   schema, not the differently named monthly full-field pixel export.

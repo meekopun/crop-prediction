@@ -270,6 +270,13 @@ The comparison uses mean cross-validated F1 for each crop. The current
 `--augmented-families s2,s1,precip` against it compares identical features,
 and the script prints a warning when that happens.
 
+### Batch pipeline (incomplete)
+
+The province-wide batch workflow in `batch_pipeline/` has its own commands,
+credentials and current gaps; see [its README](../batch_pipeline/README.md).
+Its direct Copernicus Data Space extraction is not implemented, so it cannot yet
+produce training features.
+
 ## 4. Known runtime requirements and constraints
 
 - `raw_data/quarter_sections.geojson` is large, so step 0 should be run in place rather

@@ -1,7 +1,7 @@
 # Crop yield pipeline guide
 
-Updated 2026-10-01 after the batch helpers and scene-manifest builder were supplied. This is
-the current workflow map. Run local commands from `crop-yield/` with its package
+Updated 2026-10-22: workflow D moved to `crop-classification/batch_pipeline/`, and
+E's builder was recovered. This is the current workflow map. Run local commands from `crop-yield/` with its package
 installed, or use `PYTHONPATH=src` for Python module/script calls.
 
 ## Workflow map
@@ -11,13 +11,14 @@ installed, or use `PYTHONPATH=src` for Python module/script calls.
 | A: historical benchmark | `src/yield_prediction/{data,modeling,cli}.py` | Bundled CSV; local workflow available |
 | B: ATS geometry | `src/yield_prediction/alberta_ats.py` | Restored downloader; geometry already supplied locally; live API not verified |
 | C: seasonal satellite export | `gee/sentinel2_quarter_sections.js` | Restored; requires GEE asset/project configuration and execution |
-| D: batch crop classification | `batch_pipeline/` | All six scripts present; scene discovery implemented, preferred extraction unfinished |
-| E: full-field pixel preprocessing | Expected `scripts/build_fullfield_pixel_training_table.py` | Script still absent; raw export and reference inputs now present |
+| D: batch crop classification | Moved to `../crop-classification/batch_pipeline/` | Crop classification, not yield; documented in that project |
+| E: full-field pixel preprocessing | `scripts/build_fullfield_pixel_training_table.py` | Recovered 2026-10-22; runs on supplied inputs, still eight field-years |
 | F: pixel models/redistribution | `scripts/` plus package modeling modules | Implementations and prepared 2021–2023 table present |
 | G: yield-potential index | `src/yield_prediction/yield_index.py` | Relative index calculation present; requires C-format export |
 
 A is an independent historical example. B supplies geometry for extraction.
-C and D are alternative feature routes with different schemas. E prepares the
+C is the seasonal feature route; D, the former batch route, now belongs to the
+classification project. E prepares the
 monthly full-field export for F; the supplied prepared reference table lets F
 run without regenerating E. G consumes C's seasonal polygon table. The separate
 `scripts/import_harvest_data.py` stages the 2020–2025 harvest observations;
@@ -79,55 +80,34 @@ Implementation and setup: [gee/README.md](../gee/README.md).
 Output has one row per `quarter_id + year`, seasonal optical statistics, AAFC
 crop fractions, soil-moisture, weather and static context features. It is a
 polygon export, not the supplied monthly pixel table. The broader inputs in
-this restored exporter are separate from D's optical-only feature policy.
+this restored exporter are separate from the classification batch workflow's
+optical-only feature policy.
 
-## D. Batch crop classification (still incomplete)
+## D. Batch crop classification (moved)
 
-Present: config and all six scripts: preparation, shared batch utilities, CDSE
-utilities, scene-manifest builder, combined runner and binary classifier.
+The batch workflow moved to `crop-classification/batch_pipeline/` on 2026-10-22
+because it predicts crop identity, not yield. See its
+[README](../../crop-classification/batch_pipeline/README.md) for commands and gaps.
 
-The intended sequence is prepare batches → discover scenes → extract labels and
-features → train binary crop classifiers. The scene builder writes candidate
-metadata and download URLs, not raster data or predictors. The runner does not
-consume that manifest, and preferred CDSE extraction raises `NotImplementedError`.
-The legacy Sentinel Hub Statistics route also lacks required settings in the
-supplied config; local AAFC label paths are blank.
-The current `.venv` also lacks `requests`, which blocks manifest-builder and
-runner imports until installed; it is listed in `requirements.txt`.
+## E. Full-field monthly pixel preprocessing
 
-The newly copied config and preparation default refer to the former
-`quarter_sections.geojson` location. The actual supplied geometry is
-`data/raw/alberta_quarter_sections.geojson`. Set config `geojson.path` to
-`../data/raw/alberta_quarter_sections.geojson` (relative to `batch_pipeline/`),
-and supply preparation's separate `--geojson data/raw/alberta_quarter_sections.geojson`
-argument from `crop-yield/`.
-
-The trainer can evaluate completed feature tables, but selection currently uses
-held-out labels before cross-validation, parcel/year grouping does not hold out
-entire fields across years, and no fitted inference model is saved. Restored
-source does not establish completed extraction or trustworthy model scores.
-
-See [batch_pipeline/README.md](../batch_pipeline/README.md) for command paths and
-[SCRIPT_GUIDE.md](SCRIPT_GUIDE.md#d-batch-crop-classification-inside-the-yield-project)
-for the detailed process of each script.
-
-## E. Full-field monthly pixel preprocessing (script still missing)
-
-Present inputs:
+Inputs, all present:
 
 - `data/raw/pixel_crop_features_aci_s2_monthly_csv_quarter_sections_fullfield.csv`
-- `reference_inputs/Crop Yield Data - Crop Data 2021-2023-2.csv`
-- `reference_inputs/pixel_level_all_crop_training_features_2021_2023.csv`
+- `reference_inputs/pixel_level_all_crop_training_features_2021_2023.csv` (yield lookup)
+- `reference_inputs/Crop Yield Data - Crop Data 2021-2023-2.csv` (used only without the lookup)
 
-The expected `scripts/build_fullfield_pixel_training_table.py` has not been
-supplied. Its historical specification is to normalize parcel/crop/year keys,
-replace `-9999`, derive NDVI summaries, join observed yields, and build a
-`row_id` grouped modeling table. This describes planned/recovered behavior to
-implement or obtain, not a command available in this checkout.
+```bash
+python scripts/build_fullfield_pixel_training_table.py
+```
 
-Use a new generated output under `data/processed/` when this step is restored.
-Keep the supplied reference files unchanged. The monthly export's `ndvi_m04`
-style schema is different from the prepared table's `NDVI_max` style schema.
+This writes `data/processed/pixel_level_fullfield_training_features_2021_2023.csv`:
+87,176 pixel rows but still eight field-years. Yields are joined by quarter section
+and year only, so a quarter reporting two crops in one year attaches the same
+pixels to both. The monthly export's `ndvi_m04` style columns are mostly not
+recognized by F's feature sets; see the
+[script guide](SCRIPT_GUIDE.md#e-full-field-pixel-preprocessing). Keep the
+supplied reference files unchanged.
 
 ## F. Prepared-table modeling
 
@@ -145,6 +125,11 @@ for a separate run. Yield training uses per-crop OLS/ridge and grouped validatio
 crop classification uses logistic regression/random forest and grouped validation.
 Some groups/classes cannot support held-out evaluation. In-sample `fitted_*`
 predictions are not held-out results. Redistribution uses known field yield.
+
+For a stricter yield evaluation, add `--baseline --drop-year-constant` and
+optionally `--split year`. On the supplied table no model beats the
+training-mean baseline once the year-constant soil-moisture feature is removed;
+see the [script guide](SCRIPT_GUIDE.md#srcyield_predictionmodelingpy-pixel-yield-training).
 
 The table contains 749 pixel rows, eight field/crop/year groups and four crops.
 It is not an automatically imported version of the six harvest Excel reports.

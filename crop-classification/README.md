@@ -30,6 +30,11 @@ There are two practical workflows in this repo:
    Exports one row per pixel with Sentinel-2, Sentinel-1, precipitation, and
    optional AAFC labels for higher-resolution training.
 
+A third, incomplete batch workflow in [batch_pipeline/](batch_pipeline/README.md)
+plans province-wide batches and discovers Sentinel-2 scenes from Copernicus Data
+Space, but cannot yet extract training features. It moved here from the yield
+project on 2026-10-22.
+
 Use [the pipeline map](docs/PIPELINE_GUIDE.md) for stage/folder roles and
 [the runbook](docs/RUNBOOK.md) for the exact commands.
 
@@ -86,6 +91,7 @@ require normal outbound network access.
 
 - [scripts/](scripts/): numbered polygon pipeline, training, prediction, and feature comparison
 - [preprocessing/](preprocessing/): pixel sampling/export with resumable progress tracking
+- [batch_pipeline/](batch_pipeline/README.md): incomplete province-wide batch workflow with its own config and trainer
 - [raw_data/](raw_data/): local province-wide quarter-section source
 - [data/](data/): prepared tables and generated features
 - [models/](models/): generated model bundles and evaluation outputs

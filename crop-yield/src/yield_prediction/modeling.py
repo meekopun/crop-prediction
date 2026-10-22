@@ -28,6 +28,9 @@ class PixelYieldModelMetrics:
     mean_mae: float
     mean_rmse: float
     mean_r2: float | None
+    split: str = "field_year"
+    field_mae: float | None = None
+    field_r2: float | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class PixelYieldTrainingArtifact:
     metrics: list[PixelYieldModelMetrics]
     predictions: object
     feature_columns: list[str]
+    dropped_feature_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,18 @@ def _build_pixel_feature_sets(frame: object) -> dict[str, list[str]]:
     }
 
 
+def _year_constant_columns(frame: object, columns: list[str], year_column: str = "year") -> list[str]:
+    """Return columns with at most one value within every year.
+
+    Such columns identify the year rather than the field. With few years and
+    year-level yields, a model can fit them exactly and ignore field signals.
+    """
+    if not columns or year_column not in frame.columns:
+        return []
+    distinct = frame.groupby(year_column)[columns].nunique(dropna=True).max()
+    return [column for column in columns if distinct[column] <= 1]
+
+
 def train_pixel_yield_models(
     csv_path: Path | str,
     *,
@@ -151,11 +167,22 @@ def train_pixel_yield_models(
     group_column: str = "row_id",
     feature_set: str = "nonleaky",
     alpha: float = 1.0,
+    split: str = "field_year",
+    drop_year_constant: bool = False,
+    include_baseline: bool = False,
 ) -> PixelYieldTrainingArtifact:
+    """Train per-crop OLS/ridge models under grouped cross-validation.
+
+    ``split="field_year"`` holds out one ``group_column`` value per fold;
+    ``split="year"`` holds out every field from one year. ``drop_year_constant``
+    removes features with a single value within every year, and
+    ``include_baseline`` adds a model predicting the training-fold mean yield.
+    """
     _require_ml_dependencies()
 
     import numpy as np
     import pandas as pd
+    from sklearn.dummy import DummyRegressor
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LinearRegression, Ridge
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -163,18 +190,30 @@ def train_pixel_yield_models(
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
+    if split not in {"field_year", "year"}:
+        raise ValueError(f"Unknown split '{split}'. Expected 'field_year' or 'year'.")
     frame = pd.read_csv(csv_path)
+    if split == "year" and "year" not in frame.columns:
+        raise ValueError("split='year' requires a 'year' column.")
     feature_sets = _build_pixel_feature_sets(frame)
     if feature_set not in feature_sets:
         raise ValueError(
             f"Unknown feature set '{feature_set}'. Expected one of {sorted(feature_sets)}."
         )
     feature_columns = feature_sets[feature_set]
+    dropped_columns: list[str] = []
+    if drop_year_constant:
+        dropped_columns = _year_constant_columns(frame, feature_columns)
+        feature_columns = [column for column in feature_columns if column not in dropped_columns]
+        if not feature_columns:
+            raise ValueError(f"Every '{feature_set}' feature is constant within each year.")
 
     model_specs = [
         ("ols", LinearRegression()),
         ("ridge", Ridge(alpha=alpha)),
     ]
+    if include_baseline:
+        model_specs.insert(0, ("mean_baseline", DummyRegressor(strategy="mean")))
 
     metrics: list[PixelYieldModelMetrics] = []
     prediction_frames: list[pd.DataFrame] = []
@@ -183,6 +222,8 @@ def train_pixel_yield_models(
         crop_frame = crop_frame.copy()
         groups = crop_frame[group_column]
         unique_groups = int(groups.nunique(dropna=True))
+        fold_groups = crop_frame["year"] if split == "year" else groups
+        fold_group_count = int(fold_groups.nunique(dropna=True))
         crop_predictions = crop_frame[
             [crop_column, group_column, "year", "quarter_section", target_column]
         ].copy()
@@ -194,14 +235,14 @@ def train_pixel_yield_models(
             prediction_column = f"pred_{model_name}_{feature_set}"
             crop_predictions[prediction_column] = np.nan
 
-            if unique_groups >= 2 and y.nunique(dropna=True) >= 2:
-                cv_splits = min(5, unique_groups)
+            if fold_group_count >= 2 and y.nunique(dropna=True) >= 2:
+                cv_splits = min(5, fold_group_count)
                 splitter = GroupKFold(n_splits=cv_splits)
                 fold_mae: list[float] = []
                 fold_rmse: list[float] = []
                 fold_r2: list[float] = []
 
-                for train_idx, test_idx in splitter.split(X, y, groups):
+                for train_idx, test_idx in splitter.split(X, y, fold_groups):
                     pipeline = Pipeline(
                         [
                             ("imputer", SimpleImputer(strategy="median")),
@@ -228,6 +269,20 @@ def train_pixel_yield_models(
                         )
 
                 mean_r2 = float(np.mean(fold_r2)) if fold_r2 else None
+                # Yield is measured per field-year, so also score the mean
+                # held-out prediction of each field-year against its yield.
+                field_level = (
+                    pd.DataFrame({"group": groups, "actual": y,
+                                  "predicted": crop_predictions[prediction_column]})
+                    .groupby("group")[["actual", "predicted"]]
+                    .mean()
+                )
+                field_mae = float(mean_absolute_error(field_level["actual"], field_level["predicted"]))
+                field_r2 = (
+                    float(r2_score(field_level["actual"], field_level["predicted"]))
+                    if field_level["actual"].nunique() >= 2
+                    else None
+                )
                 metrics.append(
                     PixelYieldModelMetrics(
                         crop=str(crop_name),
@@ -240,6 +295,9 @@ def train_pixel_yield_models(
                         mean_mae=float(np.mean(fold_mae)),
                         mean_rmse=float(np.mean(fold_rmse)),
                         mean_r2=mean_r2,
+                        split=split,
+                        field_mae=field_mae,
+                        field_r2=field_r2,
                     )
                 )
             else:
@@ -255,6 +313,7 @@ def train_pixel_yield_models(
                         mean_mae=float("nan"),
                         mean_rmse=float("nan"),
                         mean_r2=None,
+                        split=split,
                     )
                 )
 
@@ -275,6 +334,7 @@ def train_pixel_yield_models(
         metrics=metrics,
         predictions=predictions,
         feature_columns=feature_columns,
+        dropped_feature_columns=tuple(dropped_columns),
     )
 
 

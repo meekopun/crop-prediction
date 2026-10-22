@@ -5,8 +5,8 @@ modeling. Each project has its own environment, dependencies, and run instructio
 
 | Project | Start here | Status |
 | --- | --- | --- |
-| Crop classification | [crop-classification/README.md](crop-classification/README.md) | Polygon and pixel workflows; satellite exports require external services |
-| Crop yield | [crop-yield/README.md](crop-yield/README.md) | Restored historical/pixel models and extraction source; batch/preprocessing gaps remain |
+| Crop classification | [crop-classification/README.md](crop-classification/README.md) | Polygon and pixel workflows; incomplete batch workflow; satellite exports require external services |
+| Crop yield | [crop-yield/README.md](crop-yield/README.md) | Restored historical/pixel models, extraction source and full-field builder; harvest-record integration pending |
 
 ```text
 crop-classification/
@@ -14,6 +14,7 @@ crop-classification/
   requirements.txt
   scripts/          # Numbered pipeline, training, and prediction
   preprocessing/    # Pixel preparation with progress tracking
+  batch_pipeline/   # Incomplete province-wide batch classification workflow
   docs/             # Runbook and transfer manifest
   raw_data/         # Large local source geometry
   data/             # Prepared tables and generated features
@@ -25,10 +26,10 @@ crop-yield/
   src/yield_prediction/  # Historical/pixel models, ATS downloader, relative index
   gee/             # Seasonal Earth Engine JavaScript exporter
   reference_inputs/ # Supplied yield labels and prepared pixel/lookup CSV
-  scripts/          # Benchmark launcher and pixel modeling entry points
+  scripts/          # Benchmark launcher, harvest import, full-field builder, pixel models
+  config/           # Saved harvest review decisions
   tests/
   docs/             # Current workflow map, script guide, next steps, transfer inventory
-  batch_pipeline/   # Incomplete Alberta extraction and training workflow
   data/
     raw/            # Historical CSV, supplied ATS geometry and raw pixel export
     processed/      # Generated model/index outputs and previous benchmark results
@@ -59,7 +60,8 @@ field matching, and preparation needed before training.
 - `Crop Yield Prediction/basic_pipeline/` → `crop-yield/`
 - Classification's duplicate handoff docs → one README and `docs/`
 - Yield's `upstream/scripts/` → `scripts/`
-- Yield's `upstream/crop_classification_batch_pipeline/` → `batch_pipeline/`
+- Yield's `upstream/crop_classification_batch_pipeline/` → `batch_pipeline/`, then
+  `crop-yield/batch_pipeline/` → `crop-classification/batch_pipeline/` (2026-10-22)
 - Yield's `archive/yield_df.csv` → `data/raw/yield_df.csv`
 
 Existing terminals should change into the new project directory and reactivate

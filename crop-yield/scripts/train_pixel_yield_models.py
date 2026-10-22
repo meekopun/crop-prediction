@@ -38,19 +38,51 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Ridge regularization strength.",
     )
+    parser.add_argument(
+        "--split",
+        choices=["field_year", "year"],
+        default="field_year",
+        help="Hold out one field-year per fold, or every field from one year.",
+    )
+    parser.add_argument(
+        "--drop-year-constant",
+        action="store_true",
+        help="Drop features with a single value within every year; they act as year labels.",
+    )
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Also score a baseline that predicts the training-fold mean yield.",
+    )
     return parser
 
 
-def build_summary(metrics: pd.DataFrame, feature_set: str, feature_count: int) -> str:
+def build_summary(
+    metrics: pd.DataFrame,
+    feature_set: str,
+    feature_count: int,
+    *,
+    split: str = "field_year",
+    dropped_columns: tuple[str, ...] = (),
+) -> str:
+    if split == "year":
+        split_text = "Grouped validation holds out every field from one year, so test years are unseen in training."
+    else:
+        split_text = "Grouped validation is done by `row_id`, so train/test splits do not share the same field-year."
     lines = [
         "# Pixel Yield Model Summary",
         "",
         f"- Feature set: `{feature_set}`",
         f"- Feature count: {feature_count}",
-        "",
-        "Grouped validation is done by `row_id`, so train/test splits do not share the same field-year.",
-        "",
     ]
+    if dropped_columns:
+        lines.append(f"- Dropped year-constant features: {', '.join(f'`{c}`' for c in dropped_columns)}")
+    lines.extend([
+        "",
+        split_text,
+        "`field_mae`/`field_r2` score each field-year's mean held-out prediction against its yield.",
+        "",
+    ])
     for crop_name, crop_metrics in metrics.groupby("crop", sort=True):
         lines.extend([f"## {crop_name}", ""])
         for row in crop_metrics.itertuples(index=False):
@@ -61,9 +93,11 @@ def build_summary(metrics: pd.DataFrame, feature_set: str, feature_count: int) -
                 )
                 continue
             r2_text = "NA" if pd.isna(row.mean_r2) else f"{row.mean_r2:.3f}"
+            field_r2_text = "NA" if pd.isna(row.field_r2) else f"{row.field_r2:.3f}"
             lines.append(
                 f"- `{row.model}`: mae={row.mean_mae:.3f} bu/ac, "
                 f"rmse={row.mean_rmse:.3f} bu/ac, r2={r2_text}, "
+                f"field_mae={row.field_mae:.3f} bu/ac, field_r2={field_r2_text}, "
                 f"field_years={row.field_year_count}, pixels={row.pixel_count}"
             )
         lines.append("")
@@ -76,18 +110,36 @@ def main() -> None:
         args.input,
         feature_set=args.feature_set,
         alpha=args.alpha,
+        split=args.split,
+        drop_year_constant=args.drop_year_constant,
+        include_baseline=args.baseline,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Option suffixes keep default-run filenames unchanged.
+    run_name = args.feature_set
+    if args.split == "year":
+        run_name += "_year_split"
+    if args.drop_year_constant:
+        run_name += "_no_year_constant"
+    if args.baseline:
+        run_name += "_baseline"
+
     metrics_frame = pd.DataFrame(asdict(metric) for metric in artifact.metrics)
-    metrics_path = args.output_dir / f"metrics_{args.feature_set}.csv"
-    predictions_path = args.output_dir / f"pixel_predictions_{args.feature_set}.csv"
-    summary_path = args.output_dir / f"summary_{args.feature_set}.md"
+    metrics_path = args.output_dir / f"metrics_{run_name}.csv"
+    predictions_path = args.output_dir / f"pixel_predictions_{run_name}.csv"
+    summary_path = args.output_dir / f"summary_{run_name}.md"
 
     metrics_frame.to_csv(metrics_path, index=False)
     artifact.predictions.to_csv(predictions_path, index=False)
     summary_path.write_text(
-        build_summary(metrics_frame, args.feature_set, len(artifact.feature_columns)),
+        build_summary(
+            metrics_frame,
+            args.feature_set,
+            len(artifact.feature_columns),
+            split=args.split,
+            dropped_columns=artifact.dropped_feature_columns,
+        ),
         encoding="utf-8",
     )
 

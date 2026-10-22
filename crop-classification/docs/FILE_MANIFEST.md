@@ -9,6 +9,9 @@ Minimum files:
 - `requirements.txt`
 - entire `scripts/` directory
 - entire `preprocessing/` directory if pixel preprocessing is in scope
+- entire `batch_pipeline/` directory if the batch workflow is in scope (its
+  batch plans, tracker, `batch_geojson/`, `scene_manifests/`, `batch_features/`
+  and `model_outputs/` are generated at runtime)
 - `raw_data/quarter_sections.geojson`
 - `docs/` documentation folder
 
@@ -17,6 +20,8 @@ External requirements:
 - Google Earth Engine account and authentication
 - Google Cloud project ID enabled for Earth Engine
 - Network access to AAFC endpoints
+- For the batch workflow: `CDSE_USERNAME`/`CDSE_PASSWORD`, or Sentinel Hub
+  credentials and a Statistics endpoint; optionally an AAFC crop-inventory raster
 
 Generated at runtime:
 

@@ -114,6 +114,27 @@ self-contained pixel-only bundle. Its copies differ substantively:
 A fix to a pixel script usually needs applying in both copies. `scripts/05` and
 `scripts/07` are the only training path — `preprocessing/` has no trainer.
 
+### `batch_pipeline/` is a separate, incomplete workflow
+
+Moved here from `crop-yield/` on 2026-10-22. It has its own helpers, config and
+trainer and does not use `scripts/05`. Run as `python batch_pipeline/<script>.py`
+from `crop-classification/`; outputs resolve relative to `batch_pipeline/`.
+
+- `batch_pipeline/crop_classification_pipeline_config.json`
+  is the contract for the batch flow: labels may come from AAFC (local raster
+  preferred, GEE fallback) but **all predictor features must come from Copernicus
+  Data Space Sentinel-2 L2A**, never GEE. Season Apr 1–Oct 1, 7-day aggregation,
+  10 m, 40 batches. `feature_policy.exclude` bars soil moisture, weather, static
+  soil, and terrain features. Needs `CDSE_USERNAME` / `CDSE_PASSWORD`.
+- Scene discovery works; the runner's direct-CDSE extraction raises
+  `NotImplementedError` and was never written, so no feature CSVs exist yet.
+- Geometry defaults (`../quarter_sections.geojson`) resolve to
+  `crop-classification/quarter_sections.geojson`, a local untracked symlink to
+  `raw_data/quarter_sections.geojson`; without it pass/set that path explicitly.
+- Batch training (`train_one_vs_rest_crop_models.py`) groups by
+  `(quarter_section, year)` under `StratifiedGroupKFold` and ranks features before
+  CV — same leakage concern as the classification side.
+
 ## Crop Yield (`crop-yield/`)
 
 ```bash
@@ -140,14 +161,14 @@ previous chronological implementation, not from the restored random-split CLI.
 ### Remaining incomplete Alberta workflows
 
 The current `docs/PIPELINE_GUIDE.md` records workflows A–G and current availability.
-Only `scripts/build_fullfield_pixel_training_table.py` remains absent among the
-documented source. All six batch scripts, including shared/CDSE utilities and the
-scene-manifest builder, are present. The manifest contains discovery metadata;
-the preferred direct-CDSE feature extraction branch remains unimplemented. The
-newly copied batch config/preparation default points to the former geometry path;
-see `batch_pipeline/README.md` for the current path and override. New harvest
-Excel import/field matching is separate
-work; supplied 2021–2023 reference CSVs do not imply that integration is done.
+Workflow D (batch crop classification) moved to `crop-classification/batch_pipeline/`;
+its letter is kept so E–G references stay stable. No documented source is missing:
+`scripts/build_fullfield_pixel_training_table.py` was recovered on 2026-10-22, but
+it joins yields by quarter section and year (not crop) and adds no field-years.
+Files copied from the old-repository zip use pre-reorganization default paths;
+check them against `docs/HANDOFF_NOTES.md` before running. New harvest Excel
+import/field matching is separate work; supplied 2021–2023 reference CSVs do not
+imply that integration is done.
 
 ### What the surviving code does
 
@@ -156,15 +177,11 @@ work; supplied 2021–2023 reference CSVs do not imply that integration is done.
   `NDVI_min` 0.2), quantile-scaled within `row_id` groups and clamped to
   `[min_factor, max_factor]` so group means are preserved. pandas is imported
   lazily inside functions so the module stays importable without ML extras.
-- `batch_pipeline/crop_classification_pipeline_config.json`
-  is the contract for the batch flow: labels may come from AAFC (local raster
-  preferred, GEE fallback) but **all predictor features must come from Copernicus
-  Data Space Sentinel-2 L2A**, never GEE. Season Apr 1–Oct 1, 7-day aggregation,
-  10 m, 40 batches. `feature_policy.exclude` bars soil moisture, weather, static
-  soil, and terrain features. Needs `CDSE_USERNAME` / `CDSE_PASSWORD`.
-- Batch training (`train_one_vs_rest_crop_models.py`) groups by
-  `(quarter_section, year)` under `StratifiedGroupKFold` — same leakage concern
-  as the classification side.
+- `train_pixel_yield_models` has opt-in `split="year"`, `drop_year_constant` and
+  `include_baseline` (script flags `--split year --drop-year-constant --baseline`)
+  plus field-level `field_mae`/`field_r2`. Defaults reproduce the restored output.
+  On the reference table `soil_moisture_am_mean` is one value per year; once it is
+  dropped, no model beats the training-mean baseline.
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 
