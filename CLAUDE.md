@@ -191,6 +191,20 @@ imply that integration is done.
   `data/processed/harvest/satellite/harvest_satellite_features.csv`, one row per
   eligible `(pid, year)` with `quarter_*` and AAFC-crop-masked `crop_*`
   `<band>_<mon>` columns. No precipitation (CHIRPS ends at 50°N).
+  → `scripts/build_field_yield_table.py` (`field_yield.py`) → `field_yield_table.csv`
+  (144 field-years; yield = total / area over same-crop operations sharing a quarter)
+  → `scripts/benchmark_field_yield.py` (`field_benchmark.py`): per-crop mean
+  baseline vs RidgeCV vs shallow HistGradientBoosting, `year` and `section` splits.
+  Reported "best" skill is optimistic (best of six); check the skill range.
+  `scripts/holdout_field_yield.py` picks one config per crop on 2020–2024 and
+  scored 2025 once (2026-10-22): only wheat beat the baseline; canola −6.08 skill.
+  2025 is now spent as a holdout — develop further on 2020–2024 only.
+  `scripts/export_harvest_weather.py` (ERA5-Land, Apr–Sep monthly `w_*`) feeds the
+  table; `scripts/evaluate_season_field_model.py` (`season_field_model.py`) splits
+  yield into a season mean (ridge pooled over crops on weather or satellite season
+  anomalies) plus a per-crop deviation from centred satellite features. Weather
+  season model loses to the training mean with five seasons; `satellite`/`peak`
+  (chosen post hoc) is the best combination.
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 

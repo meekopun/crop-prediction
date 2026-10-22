@@ -70,13 +70,32 @@ and peas (74%), none under 10%. It mostly disagrees for oats and rye (median 0%;
 
 ## 5. Implement a field-yield benchmark
 
-- [ ] Add a separate field-data loader and training entry point. Preserve the existing historical benchmark as its own example.
-- [ ] Define an explicit predictor allowlist. Exclude observed yield, harvest total, rate-derived columns, source row IDs, and data collected after the prediction cutoff. Use observed crop only when it will also be known at prediction time.
-- [ ] Compare a crop-specific training-mean baseline with a simple regularized regression and a modest tree-based model. With this small dataset, prioritize reliable evaluation over model complexity.
-- [ ] Fit imputers, scalers and feature selection inside training folds only.
-- [ ] Use 2020–2023 for initial development, 2024 for validation, and 2025 as a proposed final chronological holdout, subject to adequate per-crop coverage after cleaning. Tune using development data rather than the final holdout.
-- [ ] Add a separate evaluation holding out entire fields across all years. A later-year test on familiar fields and a new-field test answer different questions.
-- [ ] Report MAE/RMSE in each crop's target unit, R² where meaningful, bias, and independent field/year counts. Do not pool incompatible units into one error score.
+On 2026-10-22 `scripts/build_field_yield_table.py` built 144 field-years and
+`scripts/benchmark_field_yield.py` scored six crops with at least 10 of them.
+Holding out whole sections, every model/feature combination beat the baseline for
+canola (skill +0.42 to +0.50) and wheat (+0.35 to +0.52). Holding out whole
+seasons, canola stayed positive (+0.08 to +0.42) but the average across crops was
+near zero, and peas never beat the baseline. Season-level prediction is the weak
+point: models help in unusual years and can hurt in typical ones.
+
+- [x] Add a separate field-data loader and training entry point (`field_yield.py`, `field_benchmark.py`). The historical benchmark is unchanged.
+- [x] Define an explicit predictor allowlist: only `field_<band>_<mon>` satellite columns (`FEATURE_SETS`). Whole-season features suit a retrospective estimate; an in-season forecast needs a month cutoff.
+- [x] Compare a crop-specific training-mean baseline with ridge (penalty chosen inside each training fold) and a shallow gradient-boosting model.
+- [x] Fit imputers, scalers and penalty selection inside training folds only.
+- [x] Score a final chronological holdout once. On 2026-10-22 `scripts/holdout_field_yield.py` chose one configuration per crop by leave-one-year-out on 2020–2024 (baseline included), refitted it, and scored 2025. Wheat improved (skill +0.69, 3 field-years); peas and oats kept the baseline; fescue (−0.09), barley (−0.83) and canola (−6.08) were worse. Canola over-predicted every 2025 field (bias +11.9 bu/ac) while 2025 yields sat near the long-run mean. With five training seasons, season-level yield is not learnable from satellite features alone. 2025 has now been used; further model development should use 2020–2024 only, or wait for 2026 data.
+- [x] Add a separate evaluation holding out entire fields across all years (`section` split, grouped by ATS section).
+- [x] Report MAE/RMSE in each crop's target unit, R² where meaningful, bias, and independent field/year counts.
+- [x] Reduce selection optimism: the holdout chooses one configuration per crop from development years only.
+- [x] Separate season level from field level (2026-10-22, 2020–2024 only, leave one season out; `scripts/evaluate_season_field_model.py`). Findings:
+  - ERA5-Land weather (`scripts/export_harvest_weather.py`: May–Aug rain, May–Aug GDD5, July mean high) does not predict the season mean from four training seasons: its error is 45% of the crop mean versus 38% for the training mean, and it gets the 2021 heat year backwards.
+  - Season means of peak-season satellite indices (July NDVI/NDRE/EVI) do better (34%).
+  - Within-season deviations from those three features help barley clearly (given the true season mean, skill 0.21 → 0.51) and wheat slightly; the planned 49-index set overfits and hurts every crop.
+  - Best achievable combination (satellite season + peak deviation): barley +0.45, canola +0.16, wheat +0.11, fescue +0.11, oats −0.04, peas −0.44. These feature sets were chosen after inspecting 2020–2024 diagnostics, so the scores are optimistic; 2026 data is the next clean test.
+  - Knowing the true season mean would give +0.40 to +0.56 for every crop except peas, so the season level is the main remaining lever.
+- [ ] Supply the season mean from published regional yields (e.g. AFSC or Statistics Canada crop yields for the Grande Prairie area) for retrospective estimates; weather needs many more seasons than this farm's five.
+- [x] Prefer fewer features: three peak-season indices beat 49 indices for field deviations on every crop.
+- [ ] Require a chosen model to beat the baseline by a margin on development years; with 10–34 development rows a candidate can win by chance.
+- [ ] Try pooling crops on relative yield and an in-season month cutoff.
 
 **Completion evidence:** reproducible splits and predictions outperform—or transparently fail to outperform—the baseline on truly held-out observations. A strong result from the unrelated historical CSV is not evidence for this farm dataset.
 

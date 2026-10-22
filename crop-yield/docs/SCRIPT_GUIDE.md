@@ -115,6 +115,106 @@ Accepts `--matches`, `--boundaries`, `--output-dir`, `--years` (default
 earthengine-api is missing or an export fails. On 2026-10-22 it exported 163
 quarter-section years in under a minute.
 
+### `src/yield_prediction/harvest_weather.py` and `scripts/export_harvest_weather.py`
+
+Exports ERA5-Land (`ECMWF/ERA5_LAND/DAILY_AGGR`) monthly weather for the same
+pilot-eligible `(pid, year)` units, April–September: `w_precip_<mon>` (mm),
+`w_tmean_<mon>` and `w_tmax_<mon>` (°C), `w_gdd5_<mon>` (sum of
+max(0, (tmax + tmin) / 2 − 5 °C)) and `w_soilwater_<mon>` (layer 1, m³/m³).
+Quarters are sampled at 100 m so each picks up its ~11 km cell. Writes
+per-year CSVs (kept unless `--overwrite`), `harvest_weather.csv` and a manifest
+to `data/processed/harvest/weather/`. Flags match the feature exporter. On
+2026-10-22 it exported 163 units in 10 seconds. Spread between quarters within
+a season is a few mm or tenths of a degree, so this is a season-level signal.
+
+### `src/yield_prediction/field_yield.py`
+
+**Input:** `boundary_matches.csv`, `operations.csv` (harvested totals),
+`satellite/harvest_satellite_features.csv` and `field_boundaries.geojson`.
+Standard library only.
+
+**Process:**
+
+1. Group pilot-eligible operations of the same crop and year that touch a common
+  quarter section, so a half section and its quarter join one field-year.
+2. Set `yield` = total production / total harvested area, using `total_value`
+  when its unit matches (`bu` for `bu/ac`, `lb` for `lb/ac`), else area × rate.
+   Groups with mixed units or missing features are dropped and counted.
+3. Combine the group's quarters: whole-quarter means weighted by parcel acres,
+  crop-mask means weighted by crop-labelled acres.
+4. Set `field_<band>_<mon>` to the crop-mask mean when `aci_crop_fraction` ≥ 0.1
+  (`feature_source = crop_mask`), else to the whole-quarter mean; a month without
+   crop pixels falls back to the quarter.
+
+**Output:** `data/processed/harvest/field_yield_table.csv`, one row per
+field-year with `field_key`, `section_key`, `township_key`, crop, unit, yield,
+harvested acres and share, operation IDs, `s2_valid_*` and 140 `field_*`
+columns, plus `field_yield_table_summary.json`. On 2026-10-22: 144 field-years,
+118 using the crop mask, none dropped. When `weather/harvest_weather.csv`
+exists (or `--weather PATH`), acre-weighted `w_*` columns plus
+`w_precip_may_aug` and `w_gdd5_may_aug` are added; `--no-weather` omits them.
+
+**Limits:** several fields on SE 30-71-9 W6M report more acres than the quarter,
+so their land extends beyond it. Same-crop subfields are averaged together.
+
+### `src/yield_prediction/field_benchmark.py`
+
+For each crop with at least `min_rows` (10) field-years, in its own unit, runs
+two grouped evaluations: `year` (leave one season out) and `section` (GroupKFold
+by ATS section, up to five folds, holding out land across all years). Compares
+a training-mean baseline with `RidgeCV` (median imputation, standardization,
+penalty chosen by leave-one-out inside each training fold) and a shallow
+`HistGradientBoostingRegressor`, on three feature sets: `ndvi` (7 monthly NDVI),
+`indices` (49 monthly indices) and `all` (140 columns). Reports MAE, RMSE, bias,
+pooled out-of-fold R² and `mae_skill` = 1 − MAE / baseline MAE.
+
+**Limits:** six combinations are scored per crop, so the best one is chosen after
+the fact and its skill is optimistic; check the range. Section folds share
+seasons with training data, so they test new land, not new years. No model is
+saved for inference.
+
+`holdout_field_yield()` is the non-optimistic check. For each crop it scores all
+seven candidates (baseline included) by leave-one-year-out on years before
+`test_year` only, picks the lowest MAE (ties to the simpler candidate), refits the
+chosen candidate and the baseline on those years, and scores both once on
+`test_year`. It returns the per-candidate development scores, per-crop results
+and test-year predictions.
+
+### `src/yield_prediction/season_field_model.py` and `scripts/evaluate_season_field_model.py`
+
+Splits each yield into the crop's season mean plus the field's deviation, and
+holds out one season at a time over development years only (2020–2024; later
+rows are dropped first).
+
+- **Field deviation:** per crop, `RidgeCV` on satellite features centred on the
+  crop-season feature mean (features only, so it is available for a new season),
+  trained on seasons with at least two fields. `--deviation-features indices`
+  (49) or `peak` (July NDVI, NDRE, EVI).
+- **Season level:** one ridge pooled over crops, predicting season mean / crop
+  training mean from crop-season anomalies of `--season-features weather` (May–Aug
+  rain and GDD5, July mean high) or `satellite` (season means of the peak indices).
+  Alpha is chosen by leave-one-season-out inside the training seasons.
+- **Variants scored:** training mean (baseline), season model, baseline + field,
+  season model + field, and a ceiling using the crop's other fields' actual season
+  mean (a stand-in for published regional yields), with and without the field part.
+
+Writes `season_field_<season>_<deviation>_{metrics,seasons,predictions}.csv` and
+`_summary.md` to `data/processed/harvest/benchmark/`. See NEXT_STEPS section 5 for
+the 2026-10-22 results; the `peak` and `satellite` sets were chosen after
+inspecting development diagnostics.
+
+### `scripts/build_field_yield_table.py`, `scripts/benchmark_field_yield.py` and `scripts/holdout_field_yield.py`
+
+The builder accepts `--matches`, `--operations`, `--features`, `--boundaries` and
+`--output`. The benchmark accepts `--input`, `--output-dir` (default
+`data/processed/harvest/benchmark/`) and `--min-rows`, and writes
+`field_yield_metrics.csv`, `field_yield_predictions.csv` and `summary.md`
+(best model and skill range per crop and split). It takes about 25 seconds.
+The holdout script accepts `--input`, `--output-dir`, `--test-year` (2025) and
+`--min-rows`, and writes `holdout_<year>_selection.csv`, `_results.csv`,
+`_predictions.csv` and `_summary.md`. Run it once per test year: rerunning after
+changing models with knowledge of its result makes the holdout optimistic.
+
 ## A. Historical workflow
 
 ### `src/yield_prediction/data.py`
@@ -399,6 +499,8 @@ columns, including `aci_crop_code` and `year`.
 | `tests/test_harvest.py` | Check page breaks, wrapped values, units, validation failures, staging exports and local report reconciliation |
 | `tests/test_harvest_boundaries.py` | Check legal-description parsing, streaming lookup that skips road allowances, format rejection, quarter sharing and eligibility on a synthetic GeoJSON |
 | `tests/test_harvest_features.py` | Check feature units (half sections, same-crop grouping, conflicts, missing geometry), output columns and crop-inventory code coverage; Earth Engine calls are not tested |
+| `tests/test_field_yield.py` | Check field-year grouping through half sections, total/area yield, crop-mask versus quarter features, weather merging, that the benchmark finds a synthetic NDVI signal under both splits, and that the holdout selects on earlier years only and keeps the baseline unless a model beats it there |
+| `tests/test_season_field_model.py` | On a synthetic table with rain-driven seasons and NDVI-driven field deviations: both parts add skill, later years are never used, the satellite/peak options run, and missing weather fails clearly |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs, year-constant feature removal, year split with baseline and a small restored historical benchmark |
 | `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
 | `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |

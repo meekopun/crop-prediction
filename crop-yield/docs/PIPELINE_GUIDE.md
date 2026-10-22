@@ -158,9 +158,13 @@ with explicit units and an exceptions report. `scripts/match_harvest_boundaries.
 then matches candidates to ATS quarter sections and writes `field_boundaries.geojson`
 plus a match report there. `scripts/export_harvest_features.py` exports monthly
 Earth Engine Sentinel-2/Sentinel-1 features for the eligible quarters to
-`data/processed/harvest/satellite/`. Crop/unit review, the field-yield table and
-model integration remain in [NEXT_STEPS.md](NEXT_STEPS.md); no unit conversion
-or yield aggregation is performed.
+`data/processed/harvest/satellite/`. `scripts/build_field_yield_table.py` then
+aggregates same-crop operations into 144 field-years with features, and
+`scripts/benchmark_field_yield.py` compares per-crop models with a mean baseline.
+`scripts/export_harvest_weather.py` adds ERA5-Land weather, and
+`scripts/evaluate_season_field_model.py` separates season-level and field-level yield.
+Remaining work (fixed model choice, a 2025 holdout, weather, saving a model) is in
+[NEXT_STEPS.md](NEXT_STEPS.md). No unit conversion is performed.
 
 `pyproject.toml` installs the package and optional ML dependencies;
 `requirements.txt` adds geospatial/network tools. Dependencies cannot replace

@@ -107,6 +107,42 @@ It writes one CSV per year plus `harvest_satellite_features.csv` and a manifest 
 `data/processed/harvest/satellite/`, with whole-quarter (`quarter_*`) and
 crop-inventory-masked (`crop_*`) columns. Finished years are kept on rerun.
 
+Build the field-year table and benchmark yield models against a per-crop mean:
+
+```bash
+python scripts/build_field_yield_table.py
+python scripts/benchmark_field_yield.py
+```
+
+The table (`data/processed/harvest/field_yield_table.csv`) has one row per
+harvested field-year with its aggregated yield and `field_*` satellite features.
+The benchmark writes metrics, predictions and `summary.md` to
+`data/processed/harvest/benchmark/`, holding out whole seasons (`year`) and whole
+sections (`section`).
+
+For a final, non-optimistic check, choose one model per crop on 2020–2024 and
+score it once on 2025:
+
+```bash
+python scripts/holdout_field_yield.py --test-year 2025
+```
+
+On 2026-10-22 only wheat beat the baseline on 2025; canola, barley and fescue did
+worse, so season-to-season yield is not yet predictable from satellite features
+alone. See `docs/NEXT_STEPS.md` section 5.
+
+To split yield into a season level and each field's deviation (development years
+2020–2024 only), export weather, rebuild the table and evaluate:
+
+```bash
+python scripts/export_harvest_weather.py
+python scripts/build_field_yield_table.py
+python scripts/evaluate_season_field_model.py --season-features satellite --deviation-features peak
+```
+
+`--season-features weather` uses ERA5-Land instead; with five seasons it does
+worse than the training mean.
+
 The local six-workbook check reconciles 206 operations: 172 `bu/ac`, 34 `lb/ac`.
 Exit codes: 0 for a completed import with no errors (review warnings may remain),
 1 for a file/dependency/layout failure, 2 for completed output containing errors.
