@@ -133,14 +133,19 @@ def benchmark_field_yield(table_path: Path | str = DEFAULT_TABLE_PATH, *, min_ro
 
 
 def holdout_field_yield(table_path: Path | str = DEFAULT_TABLE_PATH, *, test_year: int = 2025,
-                        min_rows: int = 10, random_state: int = 42) -> FieldHoldoutArtifact:
+                        min_rows: int = 10, random_state: int = 42,
+                        min_improvement: float = 0.0) -> FieldHoldoutArtifact:
     """Choose one configuration per crop on earlier years, then score it once on ``test_year``.
 
-    Selection uses leave-one-year-out on years before ``test_year`` only; the
-    baseline is a candidate, so a crop keeps it when no model beats it there.
-    Ties go to the earlier (simpler) candidate. The chosen configuration and the
-    baseline are then refitted on all earlier years and scored on ``test_year``.
+    Selection uses leave-one-year-out on years before ``test_year`` only; years
+    after it are ignored, so earlier years can serve as backtests. The best model
+    replaces the baseline only if its development MAE is below
+    ``(1 - min_improvement)`` times the baseline's; ties go to the earlier
+    (simpler) candidate. The chosen configuration and the baseline are then
+    refitted on all earlier years and scored on ``test_year``.
     """
+    if not 0 <= min_improvement < 1:
+        raise ValueError("min_improvement must be in [0, 1).")
     import pandas as pd
     from sklearn.model_selection import LeaveOneGroupOut
 
@@ -167,7 +172,9 @@ def holdout_field_yield(table_path: Path | str = DEFAULT_TABLE_PATH, *, test_yea
             dev_scores.append(mae)
             selection_rows.append({"crop": crop, "yield_unit": unit, "model": name,
                                    "feature_set": feature_set, "dev_mae": mae})
-        chosen_index = min(range(len(dev_scores)), key=lambda index: (dev_scores[index], index))
+        # A model replaces the baseline only if it beats it by the margin.
+        best_model = min(range(1, len(dev_scores)), key=lambda index: (dev_scores[index], index))
+        chosen_index = best_model if dev_scores[best_model] < (1 - min_improvement) * dev_scores[0] else 0
         test_candidates = _candidates(test, models)
         fitted = {}
         for index in (0, chosen_index):
@@ -180,6 +187,9 @@ def holdout_field_yield(table_path: Path | str = DEFAULT_TABLE_PATH, *, test_yea
             **base, "status": "scored",
             "chosen_model": dev_candidates[chosen_index][0],
             "chosen_feature_set": dev_candidates[chosen_index][1],
+            "min_improvement": min_improvement,
+            "best_model": f"{dev_candidates[best_model][0]} / {dev_candidates[best_model][1]}",
+            "dev_mae_best_model": dev_scores[best_model],
             "dev_mae_chosen": dev_scores[chosen_index], "dev_mae_baseline": dev_scores[0],
             "test_mae_chosen": chosen["mae"], "test_mae_baseline": baseline["mae"],
             "test_rmse_chosen": chosen["rmse"], "test_bias_chosen": chosen["bias"],

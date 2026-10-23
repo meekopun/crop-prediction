@@ -28,13 +28,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-year", type=int, default=2025, help="Held-out year scored once.")
     parser.add_argument("--min-rows", type=int, default=10,
                         help="Minimum field-years (all years) for a crop to be evaluated.")
+    parser.add_argument("--min-improvement", type=float, default=0.0,
+                        help="Share by which a model must beat the baseline's development MAE to be chosen.")
     return parser
 
 
-def build_summary(results: pd.DataFrame, test_year: int) -> str:
+def build_summary(results: pd.DataFrame, test_year: int, min_improvement: float = 0.0) -> str:
+    margin = (f" A model replaced the baseline only if it beat the baseline's development error by "
+              f"at least {min_improvement:.0%}." if min_improvement else "")
     lines = [f"# Field Yield Holdout: {test_year}", "",
              f"Each crop's configuration was chosen by leave-one-year-out on years before {test_year}",
-             "only (the mean baseline was a candidate), refitted on those years, then scored once on",
+             f"only (the mean baseline was a candidate).{margin} It was refitted on those years, then scored once on",
              f"{test_year}. Errors are mean absolute error in the crop's unit; `skill` is the share of",
              f"the baseline's {test_year} error removed. Test sets are small, so treat single crops as indicative.", "",
              "| Crop | Dev field-years | Test field-years | Chosen | Dev MAE (baseline) | "
@@ -55,7 +59,8 @@ def build_summary(results: pd.DataFrame, test_year: int) -> str:
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        artifact = holdout_field_yield(args.input, test_year=args.test_year, min_rows=args.min_rows)
+        artifact = holdout_field_yield(args.input, test_year=args.test_year, min_rows=args.min_rows,
+                                       min_improvement=args.min_improvement)
     except (OSError, KeyError, ValueError) as exc:
         print(f"Field yield holdout failed: {exc}", file=sys.stderr)
         return 1
@@ -63,11 +68,13 @@ def main() -> int:
         print(f"No crop has at least {args.min_rows} field-years.", file=sys.stderr)
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    prefix = f"holdout_{args.test_year}"
+    # The margin is part of the name so margin runs never overwrite the plain holdout.
+    prefix = f"holdout_{args.test_year}" + (f"_margin{round(args.min_improvement * 100)}"
+                                            if args.min_improvement else "")
     artifact.selection.to_csv(args.output_dir / f"{prefix}_selection.csv", index=False)
     artifact.results.to_csv(args.output_dir / f"{prefix}_results.csv", index=False)
     artifact.predictions.to_csv(args.output_dir / f"{prefix}_predictions.csv", index=False)
-    summary = build_summary(artifact.results, args.test_year)
+    summary = build_summary(artifact.results, args.test_year, args.min_improvement)
     (args.output_dir / f"{prefix}_summary.md").write_text(summary + "\n", encoding="utf-8")
     print(summary)
     print(f"Wrote {prefix}_selection.csv, _results.csv, _predictions.csv and _summary.md "

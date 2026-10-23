@@ -143,6 +143,20 @@ python scripts/evaluate_season_field_model.py --season-features satellite --devi
 `--season-features weather` uses ERA5-Land instead; with five seasons it does
 worse than the training mean.
 
+For a season level from published Peace-region yields, place Statistics Canada's
+`32100002-eng.zip` (table 32-10-0002-01) in `data/raw/statcan/`, then:
+
+```bash
+python -I scripts/prepare_regional_yields.py
+python scripts/evaluate_season_field_model.py --season-features regional --deviation-features peak
+```
+
+On 2020–2024 this beat the satellite season level only for wheat: the farm
+departs most from the Peace-region average in the extreme years (2021, 2023).
+
+When choosing models for a final holdout, add `--min-improvement 0.1` so a model
+must beat the baseline's development error by 10% to replace it.
+
 The local six-workbook check reconciles 206 operations: 172 `bu/ac`, 34 `lb/ac`.
 Exit codes: 0 for a completed import with no errors (review warnings may remain),
 1 for a file/dependency/layout failure, 2 for completed output containing errors.

@@ -69,6 +69,49 @@ class SeasonFieldModelTests(unittest.TestCase):
             self.assertLess(mae[(crop, "known_season_plus_field")], 0.7 * mae[(crop, "known_season")])
         self.assertIn("field_NDVI_jul", artifact.seasons.columns)
 
+    def test_regional_season_level_learns_the_farm_to_region_ratio(self):
+        import pandas as pd
+        from yield_prediction.season_field_model import evaluate_season_field_model
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_table(directory)
+            table = pd.read_csv(path)
+            seasons = table[table["year"] < 2025].groupby(["crop", "year"])["yield"].mean()
+            # The farm runs 10% above the region for canola; barley has no published yields.
+            regional = pd.DataFrame([{"crop": crop, "year": year, "regional_yield": mean / 1.1}
+                                     for (crop, year), mean in seasons.items() if crop == "canola"])
+            regional_path = Path(directory) / "regional.csv"
+            regional.to_csv(regional_path, index=False)
+            artifact = evaluate_season_field_model(path, deviation_features="peak", season_features="regional",
+                                                   regional_path=regional_path)
+        skill = artifact.metrics.set_index(["crop", "variant"])["skill"]
+        mae = artifact.metrics.set_index(["crop", "variant"])["mae"]
+        # A correctly scaled regional yield recovers the season mean, so it matches or
+        # beats the other-fields ceiling, and the field part then removes most error.
+        self.assertLessEqual(mae[("canola", "season_model")], mae[("canola", "known_season")])
+        self.assertGreater(skill[("canola", "season_model_plus_field")], 0.7)
+        self.assertEqual(skill[("barley", "season_model")], 0.0)
+        canola = artifact.seasons[artifact.seasons["crop"] == "canola"]
+        self.assertTrue(((canola["farm_to_region_ratio"] - 1.1).abs() < 1e-9).all())
+        self.assertTrue(artifact.seasons.loc[artifact.seasons["crop"] == "barley", "farm_to_region_ratio"].isna().all())
+
+        # The script's report renders the ratio for published crops and notes the fallback.
+        import runpy
+        script = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/evaluate_season_field_model.py"),
+                                run_name="report")
+        summary = script["build_summary"](artifact.metrics, artifact.seasons, [2020, 2024], "peak", "regional")
+        self.assertIn("published regional yield", summary)
+        self.assertIn("x1.10", summary)
+        self.assertIn("no published yield", summary)
+
+    def test_regional_option_needs_the_regional_file(self):
+        from yield_prediction.season_field_model import evaluate_season_field_model
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                evaluate_season_field_model(self.write_table(directory), season_features="regional",
+                                            regional_path=Path(directory) / "missing.csv")
+
     def test_missing_weather_columns_fail_clearly(self):
         from yield_prediction.season_field_model import evaluate_season_field_model
 

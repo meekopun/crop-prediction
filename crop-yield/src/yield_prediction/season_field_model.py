@@ -7,7 +7,9 @@ fields do better or worse than their season. The season model is one ridge
 regression, pooled over crops, that predicts the season mean relative to the
 crop's long-run mean from season-level features: ERA5-Land weather totals or the
 season mean of the crop's peak-season satellite indices. Season features enter
-as anomalies from the crop's training-season mean.
+as anomalies from the crop's training-season mean. The ``regional`` option
+instead scales the published regional yield by the farm-to-region ratio learned
+on the training seasons; crops without published yields keep the training mean.
 
 Evaluation holds out one season at a time and uses development years only
 (2020-2024 by default); later years are dropped before anything is fitted.
@@ -20,12 +22,14 @@ from pathlib import Path
 
 from .field_benchmark import DEFAULT_BENCHMARK_DIR, FEATURE_SETS
 from .field_yield import DEFAULT_TABLE_PATH
+from .regional_yields import DEFAULT_REGIONAL_PATH
 
 DEV_YEARS = (2020, 2021, 2022, 2023, 2024)
 PEAK_FEATURES = ["field_NDVI_jul", "field_NDRE_jul", "field_EVI_jul"]
 DEVIATION_FEATURE_SETS = {"indices": FEATURE_SETS["indices"], "peak": PEAK_FEATURES}
+# "regional" uses published yields from a separate file rather than table columns.
 SEASON_FEATURE_SETS = {"weather": ["w_precip_may_aug", "w_gdd5_may_aug", "w_tmax_jul"],
-                       "satellite": PEAK_FEATURES}
+                       "satellite": PEAK_FEATURES, "regional": []}
 SEASON_ALPHAS = (0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0)
 DEFAULT_OUTPUT_DIR = DEFAULT_BENCHMARK_DIR
 VARIANTS = {
@@ -84,20 +88,52 @@ def _fit_season_model(seasons, features):
     return make(best_alpha).fit(X, y), best_alpha
 
 
+def _load_regional(path: Path | str) -> dict[tuple[str, int], float]:
+    import pandas as pd
+
+    if not Path(path).exists():
+        raise ValueError(f"{path} not found; run scripts/prepare_regional_yields.py first.")
+    frame = pd.read_csv(path)
+    return {(row.crop, int(row.year)): float(row.regional_yield) for row in frame.itertuples(index=False)}
+
+
+def _regional_season_means(season_train, crops, year, regional, crop_means):
+    """Scale each crop's published regional yield by its training farm-to-region ratio."""
+    import pandas as pd
+
+    means, ratios = {}, {}
+    for crop in crops:
+        history = season_train[season_train["crop"] == crop]
+        published = history["year"].map(lambda season: regional.get((crop, season)))
+        usable = published.notna()
+        current = regional.get((crop, year))
+        if usable.any() and current is not None:
+            # Ratio of totals is steadier than the mean of per-season ratios.
+            ratios[crop] = float(history.loc[usable, "season_mean"].sum() / published[usable].sum())
+            means[crop] = ratios[crop] * current
+        else:
+            ratios[crop] = None
+            means[crop] = crop_means[crop]
+    return pd.Series(means, dtype=float), ratios
+
+
 def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
                                 years: tuple[int, ...] = DEV_YEARS, min_rows: int = 10,
                                 deviation_features: str = "indices",
-                                season_features: str = "weather") -> SeasonFieldArtifact:
+                                season_features: str = "weather",
+                                regional_path: Path | str = DEFAULT_REGIONAL_PATH) -> SeasonFieldArtifact:
     """Leave one season out over ``years``; score every variant per crop.
 
     ``deviation_features`` names a set in DEVIATION_FEATURE_SETS and
-    ``season_features`` one in SEASON_FEATURE_SETS.
+    ``season_features`` one in SEASON_FEATURE_SETS; ``regional`` reads
+    ``regional_path`` (from scripts/prepare_regional_yields.py).
     """
     import numpy as np
     import pandas as pd
 
     deviation_columns = DEVIATION_FEATURE_SETS[deviation_features]
     season_columns = SEASON_FEATURE_SETS[season_features]
+    regional = _load_regional(regional_path) if season_features == "regional" else None
     table = pd.read_csv(table_path, dtype={"field_key": str, "section_key": str, "pids": str})
     missing = [column for column in season_columns + deviation_columns if column not in table.columns]
     if missing:
@@ -121,15 +157,21 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
         season_train["relative_mean"] = season_train["season_mean"] / season_train["crop"].map(crop_means)
         season_test = test.groupby("crop").agg(season_mean=("yield", "mean"), fields=("yield", "size"),
                                                 **aggregations)
-        # Anomalies from each crop's training seasons put crops on a common footing.
-        reference = season_train.groupby("crop")[season_columns].mean()
-        anomaly_train = season_train.assign(
-            **{column: season_train[column] - season_train["crop"].map(reference[column])
-               for column in season_columns})
-        anomaly_test = season_test[season_columns] - reference.reindex(season_test.index)
-        season_model, alpha = _fit_season_model(anomaly_train, season_columns)
-        relative = pd.Series(season_model.predict(anomaly_test), index=season_test.index)
-        modelled_mean = relative * crop_means.reindex(relative.index)
+        ratios = {}
+        if regional is not None:
+            modelled_mean, ratios = _regional_season_means(season_train, season_test.index, held_out,
+                                                           regional, crop_means)
+            alpha = float("nan")
+        else:
+            # Anomalies from each crop's training seasons put crops on a common footing.
+            reference = season_train.groupby("crop")[season_columns].mean()
+            anomaly_train = season_train.assign(
+                **{column: season_train[column] - season_train["crop"].map(reference[column])
+                   for column in season_columns})
+            anomaly_test = season_test[season_columns] - reference.reindex(season_test.index)
+            season_model, alpha = _fit_season_model(anomaly_train, season_columns)
+            relative = pd.Series(season_model.predict(anomaly_test), index=season_test.index)
+            modelled_mean = relative * crop_means.reindex(relative.index)
 
         deviation = pd.Series(0.0, index=test.index)
         for crop, crop_test in test.groupby("crop"):
@@ -161,7 +203,9 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
             season_rows.append({"crop": crop, "year": held_out, "fields": int(row["fields"]),
                                 "actual_season_mean": row["season_mean"], "baseline_mean": crop_means[crop],
                                 "modelled_mean": modelled_mean[crop], "season_alpha": alpha,
-                                **{column: row[column] for column in season_columns}})
+                                **{column: row[column] for column in season_columns},
+                                **({"regional_yield": regional.get((crop, held_out)),
+                                    "farm_to_region_ratio": ratios.get(crop)} if regional is not None else {})})
 
     predictions = pd.concat(prediction_frames, ignore_index=True)
     metric_rows = []

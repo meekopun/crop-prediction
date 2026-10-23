@@ -182,6 +182,21 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(set(artifact.predictions["year"]), {2025})
         self.assertAlmostEqual(result["dev_mae_chosen"], artifact.selection["dev_mae"].min())
 
+    def test_margin_keeps_the_baseline_unless_a_model_clearly_wins(self):
+        from yield_prediction.field_benchmark import holdout_field_yield
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._table(directory, signal=True)
+            plain = holdout_field_yield(path, test_year=2025).results.iloc[0]
+            strict = holdout_field_yield(path, test_year=2025, min_improvement=0.99).results.iloc[0]
+            with self.assertRaises(ValueError):
+                holdout_field_yield(path, test_year=2025, min_improvement=1.0)
+        self.assertNotEqual(plain["chosen_model"], "mean_baseline")
+        # An impossible margin always keeps the baseline, which then scores zero skill.
+        self.assertEqual(strict["chosen_model"], "mean_baseline")
+        self.assertEqual(strict["test_mae_skill"], 0.0)
+        self.assertEqual(strict["best_model"], plain["best_model"])
+
     def test_holdout_falls_back_to_the_baseline_without_signal(self):
         from yield_prediction.field_benchmark import holdout_field_yield
 

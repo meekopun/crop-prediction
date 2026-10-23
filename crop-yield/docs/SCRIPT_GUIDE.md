@@ -178,7 +178,25 @@ seven candidates (baseline included) by leave-one-year-out on years before
 `test_year` only, picks the lowest MAE (ties to the simpler candidate), refits the
 chosen candidate and the baseline on those years, and scores both once on
 `test_year`. It returns the per-candidate development scores, per-crop results
-and test-year predictions.
+and test-year predictions. With `min_improvement` (script `--min-improvement`),
+the best model replaces the baseline only if its development MAE is below
+(1 − margin) × the baseline's; results record the best model either way. Years
+after `test_year` are ignored, so `--test-year 2023` or `2024` gives a backtest
+on development data. Margin runs add `_margin<pct>` to output names.
+
+### `src/yield_prediction/regional_yields.py` and `scripts/prepare_regional_yields.py`
+
+Streams Statistics Canada table 32-10-0002-01 (full-table zip
+`data/raw/statcan/32100002-eng.zip`, or an extracted CSV via `--source`) and keeps
+`Average yield (bushels per acre)` rows for `--region` (default `Small Area Data
+Region 70 - Alberta`, the Peace region) from `--first-year` (2015). Crops map as
+barley, canola, oats, `Peas, dry` → `field_peas` and `Wheat, spring` → `wheat`
+(the farm grows Stettler, a hard red spring wheat). Suppressed values are skipped.
+Writes `data/processed/regional/regional_yields.csv` (region, year, crop,
+regional_yield, unit, source, status). On 2026-10-23 it wrote 55 crop-years
+(five crops, 2015–2025) in about a second, with no suppressed values. Region 70
+is Census Agricultural Region 7 (census divisions 17–19, including Grande Prairie
+County No. 1). Run it with `python -I` because it reads a downloaded archive.
 
 ### `src/yield_prediction/season_field_model.py` and `scripts/evaluate_season_field_model.py`
 
@@ -194,6 +212,10 @@ rows are dropped first).
   training mean from crop-season anomalies of `--season-features weather` (May–Aug
   rain and GDD5, July mean high) or `satellite` (season means of the peak indices).
   Alpha is chosen by leave-one-season-out inside the training seasons.
+  `regional` instead multiplies the held-out season's published regional yield
+  by the crop's farm-to-region ratio (sum of training farm season means / sum of
+  their regional yields); crops without published yields keep the training mean.
+  Reads `--regional` (default `data/processed/regional/regional_yields.csv`).
 - **Variants scored:** training mean (baseline), season model, baseline + field,
   season model + field, and a ceiling using the crop's other fields' actual season
   mean (a stand-in for published regional yields), with and without the field part.
@@ -500,7 +522,8 @@ columns, including `aci_crop_code` and `year`.
 | `tests/test_harvest_boundaries.py` | Check legal-description parsing, streaming lookup that skips road allowances, format rejection, quarter sharing and eligibility on a synthetic GeoJSON |
 | `tests/test_harvest_features.py` | Check feature units (half sections, same-crop grouping, conflicts, missing geometry), output columns and crop-inventory code coverage; Earth Engine calls are not tested |
 | `tests/test_field_yield.py` | Check field-year grouping through half sections, total/area yield, crop-mask versus quarter features, weather merging, that the benchmark finds a synthetic NDVI signal under both splits, and that the holdout selects on earlier years only and keeps the baseline unless a model beats it there |
-| `tests/test_season_field_model.py` | On a synthetic table with rain-driven seasons and NDVI-driven field deviations: both parts add skill, later years are never used, the satellite/peak options run, and missing weather fails clearly |
+| `tests/test_season_field_model.py` | On a synthetic table with rain-driven seasons and NDVI-driven field deviations: both parts add skill, later years are never used, the satellite/peak options run, the regional option recovers a known farm-to-region ratio and falls back without published yields, and missing inputs fail clearly |
+| `tests/test_regional_yields.py` | Check the StatCan converter keeps only the region's yield rows for mapped crops from a zipped table, skips suppressed values and fails without matches |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs, year-constant feature removal, year split with baseline and a small restored historical benchmark |
 | `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
 | `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |
