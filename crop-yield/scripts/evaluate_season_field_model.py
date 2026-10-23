@@ -19,10 +19,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from yield_prediction.field_yield import DEFAULT_TABLE_PATH
-from yield_prediction.regional_yields import DEFAULT_REGIONAL_PATH
+from yield_prediction.regional_features import DEFAULT_REGIONAL_FEATURES_PATH
+from yield_prediction.regional_yields import DEFAULT_ALBERTA_YIELDS_PATH, DEFAULT_REGIONAL_PATH
 from yield_prediction.season_field_model import (
     DEFAULT_OUTPUT_DIR, DEV_YEARS, DEVIATION_FEATURE_SETS, SEASON_FEATURE_SETS, VARIANTS,
-    evaluate_season_field_model,
+    evaluate_regional_season_models, evaluate_season_field_model, load_region_table,
 )
 
 
@@ -41,11 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "or published regional yields.")
     parser.add_argument("--regional", type=Path, default=DEFAULT_REGIONAL_PATH,
                         help="regional_yields.csv for --season-features regional.")
+    parser.add_argument("--regional-yields", type=Path, default=DEFAULT_ALBERTA_YIELDS_PATH,
+                        help="All-Alberta regional yields for --season-features regional_satellite.")
+    parser.add_argument("--regional-features", type=Path, default=DEFAULT_REGIONAL_FEATURES_PATH,
+                        help="Regional crop-masked features for --season-features regional_satellite.")
     return parser
 
 
 def build_summary(metrics: pd.DataFrame, seasons: pd.DataFrame, years: list[int],
-                  deviation_features: str, season_features: str) -> str:
+                  deviation_features: str, season_features: str,
+                  regional_check: pd.DataFrame | None = None) -> str:
     lines = [f"# Season + Field Yield Model ({min(years)}-{max(years)}, leave one season out)", "",
              f"Field deviation: `{deviation_features}` features "
              f"({len(DEVIATION_FEATURE_SETS[deviation_features])} columns, centred on the crop-season mean). "
@@ -72,21 +78,38 @@ def build_summary(metrics: pd.DataFrame, seasons: pd.DataFrame, years: list[int]
                   "| Crop | Year | Fields | Actual | Training mean | Modelled | Alpha or ratio |",
                   "| --- | --- | --- | --- | --- | --- | --- |"])
     for row in seasons.sort_values(["crop", "year"]).to_dict("records"):
-        ratio = row.get("farm_to_region_ratio")
-        setting = (f"{row['season_alpha']:g}" if not pd.isna(row["season_alpha"])
-                   else "no published yield" if ratio is None or pd.isna(ratio) else f"x{ratio:.2f}")
+        ratio, relative = row.get("farm_to_region_ratio"), row.get("predicted_relative")
+        if not pd.isna(row["season_alpha"]):
+            setting = f"{row['season_alpha']:g}"
+        elif "predicted_relative" in row:
+            setting = "training mean (no regional model)" if pd.isna(relative) else f"relative {relative:.2f}"
+        else:
+            setting = "no published yield" if ratio is None or pd.isna(ratio) else f"x{ratio:.2f}"
         lines.append(f"| {row['crop']} | {row['year']} | {row['fields']} | {row['actual_season_mean']:.1f} | "
                      f"{row['baseline_mean']:.1f} | {row['modelled_mean']:.1f} | {setting} |")
+    if regional_check is not None and not regional_check.empty:
+        lines.extend(["", "## Regional model on the regions themselves", "",
+                      "Leave one year out over all Alberta region-years: error in relative yield "
+                      "(1.00 = the region's long-run mean) versus always predicting 1.00.", "",
+                      "| Crop | Region-years | Model error | Baseline error | Skill |",
+                      "| --- | --- | --- | --- | --- |"])
+        for row in regional_check.itertuples(index=False):
+            lines.append(f"| {row.crop} | {row.region_years} | {row.relative_mae:.3f} | "
+                         f"{row.baseline_relative_mae:.3f} | {row.skill:+.2f} |")
     return "\n".join(lines)
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    region_table = regional_check = None
     try:
+        if args.season_features == "regional_satellite":
+            region_table = load_region_table(args.regional_yields, args.regional_features)
+            regional_check = evaluate_regional_season_models(region_table)
         artifact = evaluate_season_field_model(args.input, years=tuple(args.years), min_rows=args.min_rows,
                                                deviation_features=args.deviation_features,
                                                season_features=args.season_features,
-                                               regional_path=args.regional)
+                                               regional_path=args.regional, region_table=region_table)
     except (OSError, KeyError, ValueError) as exc:
         print(f"Season + field evaluation failed: {exc}", file=sys.stderr)
         return 1
@@ -95,8 +118,10 @@ def main() -> int:
     artifact.metrics.to_csv(args.output_dir / f"{prefix}_metrics.csv", index=False)
     artifact.seasons.to_csv(args.output_dir / f"{prefix}_seasons.csv", index=False)
     artifact.predictions.to_csv(args.output_dir / f"{prefix}_predictions.csv", index=False)
+    if regional_check is not None:
+        regional_check.to_csv(args.output_dir / f"{prefix}_regional_check.csv", index=False)
     summary = build_summary(artifact.metrics, artifact.seasons, args.years,
-                            args.deviation_features, args.season_features)
+                            args.deviation_features, args.season_features, regional_check)
     (args.output_dir / f"{prefix}_summary.md").write_text(summary + "\n", encoding="utf-8")
     print(summary)
     print(f"Wrote {prefix}_* outputs to {args.output_dir.resolve()}")

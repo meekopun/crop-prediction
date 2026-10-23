@@ -154,6 +154,18 @@ python scripts/evaluate_season_field_model.py --season-features regional --devia
 On 2020–2024 this beat the satellite season level only for wheat: the farm
 departs most from the Peace-region average in the extreme years (2021, 2023).
 
+The best season level so far learns from all Alberta regions (Earth Engine login
+needed for the export, about 20 minutes):
+
+```bash
+python -I scripts/prepare_regional_yields.py --all-alberta --first-year 2019
+python scripts/export_regional_features.py
+python scripts/evaluate_season_field_model.py --season-features regional_satellite --deviation-features peak
+```
+
+On 2020–2024 its season error was 24.8% of the crop mean versus 34.2% for the
+training mean; see `docs/NEXT_STEPS.md` section 5.
+
 When choosing models for a final holdout, add `--min-improvement 0.1` so a model
 must beat the baseline's development error by 10% to replace it.
 

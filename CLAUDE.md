@@ -209,6 +209,12 @@ imply that integration is done.
   Data Region 70 = CAR 7; zip in `data/raw/statcan/`, run with `python -I`)
   scaled by a training farm-to-region ratio. Season error 33.0% vs satellite
   31.2% vs training mean 34.2%; the farm diverges from the region in 2021/2023.
+  Best so far: `--season-features regional_satellite` — per-crop ridge trained on
+  all Alberta region-years (`export_regional_features.py`, `regional_features.py`:
+  July NDVI/NDRE/EVI over AAFC crop pixels per census-division region, 250 m,
+  2019–2025; `prepare_regional_yields.py --all-alberta`), excluding the held-out
+  season, applied to the farm's July anomaly. Season error 24.8%; with `peak`
+  field deviation, barley +0.65, wheat +0.36, canola +0.35 skill.
 - `holdout_field_yield.py --min-improvement 0.1` keeps the baseline unless a
   model beats it by 10% on development years; backtests on 2023/2024 favour 10%.
 - `row_id = quarter_section + crop + year` is the join key across the yield

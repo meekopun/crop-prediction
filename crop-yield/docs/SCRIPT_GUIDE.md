@@ -197,6 +197,24 @@ regional_yield, unit, source, status). On 2026-10-23 it wrote 55 crop-years
 (five crops, 2015–2025) in about a second, with no suppressed values. Region 70
 is Census Agricultural Region 7 (census divisions 17–19, including Grande Prairie
 County No. 1). Run it with `python -I` because it reads a downloaded archive.
+`--all-alberta` keeps all eight Alberta regions and writes
+`data/processed/regional/alberta_regional_yields.csv` (277 region-crop-years for
+2019–2025; three wheat values unpublished). Regions map to census divisions as
+10: 1, 4; 20: 2, 5; 30: 3, 6, 15; 40 (CAR 4A): 7; 41 (CAR 4B): 10; 50: 8, 9, 11;
+60: 12, 13, 14, 16; 70: 17, 18, 19 (`ALBERTA_REGION_DIVISIONS`).
+
+### `src/yield_prediction/regional_features.py` and `scripts/export_regional_features.py`
+
+For each Alberta region (a union of FAO GAUL 2015 level-2 census divisions) and
+year 2019–2025, builds a July Sentinel-2 SR median composite (same cloud mask as
+the harvest exporter) and averages July NDVI, NDRE and EVI over pixels the AAFC
+crop inventory labels as barley (133), oats (136), spring or undifferentiated
+wheat (146, 140), canola (153) or dry peas (162). One grouped `reduceRegion` at
+250 m per region-year takes about 20 seconds; per-pixel 30 m sampling timed out.
+Columns use the farm names (`field_NDVI_jul`, …) plus `pixels`. Writes
+`data/processed/regional/alberta_regional_features.csv`, appending each
+region-year so a failed run resumes (`--overwrite` restarts). Sentinel-2 SR is
+sparse over Alberta before 2019 (164–225 July scenes in 2017–2018 versus ~1,600).
 
 ### `src/yield_prediction/season_field_model.py` and `scripts/evaluate_season_field_model.py`
 
@@ -216,6 +234,14 @@ rows are dropped first).
   by the crop's farm-to-region ratio (sum of training farm season means / sum of
   their regional yields); crops without published yields keep the training mean.
   Reads `--regional` (default `data/processed/regional/regional_yields.csv`).
+  `regional_satellite` joins the all-Alberta yields and regional features, then,
+  for each held-out season, fits one ridge per crop on every other region-year:
+  relative yield (yield / region-crop mean over training years) from July
+  NDVI/NDRE/EVI anomalies (from the region-crop mean). The farm's own July
+  anomaly (against its training seasons) gives the farm's relative season
+  yield. The script also reports the regional model's leave-one-year-out
+  accuracy on the regions themselves (`_regional_check.csv`). Fescue has no
+  regional series and keeps the training mean.
 - **Variants scored:** training mean (baseline), season model, baseline + field,
   season model + field, and a ceiling using the crop's other fields' actual season
   mean (a stand-in for published regional yields), with and without the field part.
@@ -524,6 +550,7 @@ columns, including `aci_crop_code` and `year`.
 | `tests/test_field_yield.py` | Check field-year grouping through half sections, total/area yield, crop-mask versus quarter features, weather merging, that the benchmark finds a synthetic NDVI signal under both splits, and that the holdout selects on earlier years only and keeps the baseline unless a model beats it there |
 | `tests/test_season_field_model.py` | On a synthetic table with rain-driven seasons and NDVI-driven field deviations: both parts add skill, later years are never used, the satellite/peak options run, the regional option recovers a known farm-to-region ratio and falls back without published yields, and missing inputs fail clearly |
 | `tests/test_regional_yields.py` | Check the StatCan converter keeps only the region's yield rows for mapped crops from a zipped table, skips suppressed values and fails without matches |
+| `tests/test_regional_season_model.py` | On synthetic regions and a farm sharing one satellite-to-yield relation: the regional model predicts held-out region-years, transfers to the farm, and is never trained on the held-out season |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs, year-constant feature removal, year split with baseline and a small restored historical benchmark |
 | `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
 | `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |
