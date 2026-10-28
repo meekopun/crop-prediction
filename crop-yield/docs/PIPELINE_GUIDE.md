@@ -163,8 +163,10 @@ aggregates same-crop operations into 144 field-years with features, and
 `scripts/benchmark_field_yield.py` compares per-crop models with a mean baseline.
 `scripts/export_harvest_weather.py` adds ERA5-Land weather, and
 `scripts/evaluate_season_field_model.py` separates season-level and field-level yield.
-Remaining work (fixed model choice, a 2025 holdout, weather, saving a model) is in
-[NEXT_STEPS.md](NEXT_STEPS.md). No unit conversion is performed.
+`scripts/fit_season_field_bundle.py` saves the model locked for the 2026 holdout, and
+`scripts/predict_season_field.py` predicts and scores a new season. The 2026 scoring
+steps and remaining work are in [NEXT_STEPS.md](NEXT_STEPS.md). No unit conversion
+is performed.
 
 `pyproject.toml` installs the package and optional ML dependencies;
 `requirements.txt` adds geospatial/network tools. Dependencies cannot replace

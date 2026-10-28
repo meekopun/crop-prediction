@@ -72,6 +72,43 @@ def _centre(frame, columns):
     return frame[columns] - frame.groupby(["crop", "year"])[columns].transform("mean")
 
 
+def _fit_deviation_models(train, centred) -> dict:
+    """Per-crop ridge from centred features to each field's departure from its season mean."""
+    models = {}
+    for crop, crop_train in train.groupby("crop"):
+        # Seasons with one field carry no within-season contrast.
+        crop_train = crop_train[crop_train.groupby("year")["yield"].transform("size") >= 2]
+        if len(crop_train) >= 5:
+            target = crop_train["yield"] - crop_train.groupby("year")["yield"].transform("mean")
+            models[crop] = _deviation_model().fit(crop_train[centred], target)
+    return models
+
+
+def _predict_deviation(models, test, centred):
+    """Predicted departure from the season mean; zero for crops without a model."""
+    import pandas as pd
+
+    deviation = pd.Series(0.0, index=test.index)
+    for crop, crop_test in test.groupby("crop"):
+        if crop in models:
+            deviation[crop_test.index] = models[crop].predict(crop_test[centred])
+    return deviation
+
+
+def _regional_satellite_relative(models, reference, season_features) -> dict:
+    """Relative season yield per crop from the farm's anomaly against its training seasons.
+
+    ``season_features`` is indexed by crop. Crops without a regional model or with a
+    missing feature are left out, so callers fall back to the training mean.
+    """
+    anomaly = season_features[REGIONAL_FEATURES] - reference.reindex(season_features.index)
+    relative = {}
+    for crop in season_features.index:
+        if crop in models and anomaly.loc[crop].notna().all():
+            relative[crop] = models[crop][0].predict(anomaly.loc[[crop]])[0]
+    return relative
+
+
 def _fit_season_model(seasons, features):
     """Ridge on standardized season anomalies; alpha chosen by leave-one-season-out within training."""
     import numpy as np
@@ -238,13 +275,10 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
             # The held-out season is excluded from the regional training years too.
             models = fit_regional_season_models(region_table, exclude_year=held_out)
             reference = season_train.groupby("crop")[season_columns].mean()
-            anomaly_test = season_test[season_columns] - reference.reindex(season_test.index)
+            ratios = _regional_satellite_relative(models, reference, season_test)
             modelled_mean = crop_means.reindex(season_test.index).copy()
-            for crop in season_test.index:
-                if crop in models and anomaly_test.loc[crop].notna().all():
-                    relative = models[crop][0].predict(anomaly_test.loc[[crop]])[0]
-                    modelled_mean[crop] = relative * crop_means[crop]
-                    ratios[crop] = relative
+            for crop, relative in ratios.items():
+                modelled_mean[crop] = relative * crop_means[crop]
             alpha = float("nan")
         else:
             # Anomalies from each crop's training seasons put crops on a common footing.
@@ -257,15 +291,7 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
             relative = pd.Series(season_model.predict(anomaly_test), index=season_test.index)
             modelled_mean = relative * crop_means.reindex(relative.index)
 
-        deviation = pd.Series(0.0, index=test.index)
-        for crop, crop_test in test.groupby("crop"):
-            crop_train = train[train["crop"] == crop]
-            # Seasons with one field carry no within-season contrast.
-            crop_train = crop_train[crop_train.groupby("year")["yield"].transform("size") >= 2]
-            if len(crop_train) >= 5:
-                target = crop_train["yield"] - crop_train.groupby("year")["yield"].transform("mean")
-                deviation[crop_test.index] = _deviation_model().fit(crop_train[centred], target).predict(
-                    crop_test[centred])
+        deviation = _predict_deviation(_fit_deviation_models(train, centred), test, centred)
 
         # Ceiling: the season mean of the crop's other fields, standing in for a
         # published regional yield; a crop's only field that season falls back.

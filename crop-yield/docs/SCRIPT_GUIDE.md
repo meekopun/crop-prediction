@@ -251,6 +251,31 @@ Writes `season_field_<season>_<deviation>_{metrics,seasons,predictions}.csv` and
 the 2026-10-22 results; the `peak` and `satellite` sets were chosen after
 inspecting development diagnostics.
 
+### `src/yield_prediction/season_field_bundle.py`, `scripts/fit_season_field_bundle.py` and `scripts/predict_season_field.py`
+
+Saves and applies the configuration locked for the 2026 holdout:
+`regional_satellite` season level, `peak` field deviation, 10% margin. The fitter
+uses only years before `--test-year` (default 2026), for both the farm table and
+the regional models. Selection reruns the season + field evaluation over those
+years; a crop keeps `season_model_plus_field` only if its error is below 90% of
+the training mean's. Because regional years are also cut at the test year, its
+development skills differ slightly from `evaluate_season_field_model.py`, which
+trains on later region-years too. It then refits on every development year, using
+the same helpers as the evaluation, and writes `model.joblib`, `manifest.json`
+(config, years, feature schema, crop units, choices, development errors, input
+and model SHA-256s, library versions) and `summary.md` to
+`data/processed/harvest/models/season_field_<year>/`. It refuses to replace a
+bundle without `--overwrite`.
+
+The predictor loads a bundle, which fails if `model.joblib` no longer matches its
+manifest and warns on library-version changes. It predicts every `--year` row of
+`--input` and refuses training years. Yields are not used. Season features are
+means over the crop's fields in that season, so predict a whole season at once.
+It writes `predictions_<year>.csv`, with a `status` for unknown crops and unit
+mismatches. `--score` also writes `score_<year>.{csv,md}` (per-crop and pooled
+bu/ac MAE, skill against the training mean, bias) and refuses to rescore without
+`--overwrite`.
+
 ### `scripts/build_field_yield_table.py`, `scripts/benchmark_field_yield.py` and `scripts/holdout_field_yield.py`
 
 The builder accepts `--matches`, `--operations`, `--features`, `--boundaries` and
@@ -551,6 +576,7 @@ columns, including `aci_crop_code` and `year`.
 | `tests/test_season_field_model.py` | On a synthetic table with rain-driven seasons and NDVI-driven field deviations: both parts add skill, later years are never used, the satellite/peak options run, the regional option recovers a known farm-to-region ratio and falls back without published yields, and missing inputs fail clearly |
 | `tests/test_regional_yields.py` | Check the StatCan converter keeps only the region's yield rows for mapped crops from a zipped table, skips suppressed values and fails without matches |
 | `tests/test_regional_season_model.py` | On synthetic regions and a farm sharing one satellite-to-yield relation: the regional model predicts held-out region-years, transfers to the farm, and is never trained on the held-out season |
+| `tests/test_season_field_bundle.py` | The saved bundle reproduces the evaluation's held-out-season predictions without yields, test-year yields never change it, the margin falls back to the training mean, reloading gives identical predictions and a changed file is refused, unknown crops/units and missing columns are reported, and the scripts score once |
 | `tests/test_modeling.py` | Check feature exclusions/monthly names, grouped yield prediction outputs, year-constant feature removal, year split with baseline and a small restored historical benchmark |
 | `pyproject.toml`         | Package, CLI registration and optional ML dependencies                                                             |
 | `requirements.txt`       | Broader extraction/modeling dependencies                                                                           |

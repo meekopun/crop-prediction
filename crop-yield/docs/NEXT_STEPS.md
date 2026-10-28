@@ -99,7 +99,19 @@ point: models help in unusual years and can hurt in typical ones.
   - On the farm, 2020–2024, season-model skill: barley +0.47, canola +0.36, oats +0.34, wheat +0.29, peas −0.36; with the peak field deviation: barley +0.65, wheat +0.36, canola +0.35, oats +0.12. Season error fell to 24.8% of the crop mean (farm-only satellite 31.2%, regional yields 33.0%, training mean 34.2%). It predicted the 2021 heat year correctly (barley 34.4 vs 34.9, wheat 29.0 vs 28.7) and 2023 as high (canola 31.9 vs 43.6, under).
   - Why it works: the satellite-to-yield slope is estimated from ~48 region-years per crop instead of four farm seasons, and the farm's own July anomaly carries its local conditions.
   - Peas stay worse than the baseline; fescue has no regional series.
-- [ ] Score `regional_satellite` + `peak` on 2026 harvest records, chosen in advance with `--min-improvement 0.1`. A one-off look at 2025 is possible but no longer clean.
+- [x] Lock `regional_satellite` + `peak` with `--min-improvement 0.1` for the 2026 holdout (2026-10-28, before any 2026 record existed). `scripts/fit_season_field_bundle.py` chose per crop by leaving one season out over 2020–2025, with regional models trained on 2019–2025 region-years, and saved `data/processed/harvest/models/season_field_2026/` (`model.joblib` SHA-256 `30bd2a9909e28f9a27c764d91c51281803e155c3454c7f0d11b9439400608d5e`). Model kept for barley (development skill +0.21), canola (+0.27), oats (+0.12) and wheat (+0.43); training mean for peas (−0.46) and fescue (no regional series). Rye and the other small crops have no model.
+  - A one-off 2025 look, using a bundle fitted on 2020–2024, is not clean (2025 had been seen). It went badly: pooled bu/ac skill −0.69; wheat +0.66, barley −1.52, canola −2.44, oats −0.92, every crop biased low. July 2025 indices were low across Alberta while yields were near normal. The regional model under-predicted 2025 in all eight regions (by 7–27% on average per crop), so its ~56 region-years behave like 6–7 independent seasons. Including 2025 in selection cut barley's development skill from +0.63 to +0.21.
+- [ ] Score the locked bundle on 2026 once. Do not refit it after seeing 2026 yields:
+
+  ```bash
+  python -m pip install -e '.[ml,harvest]'      # xlrd reads the workbook
+  # put 2026-harvest-data.xls in ../harvest-data/, then review new exclusions in config/harvest_review.json
+  python scripts/import_harvest_data.py
+  python scripts/match_harvest_boundaries.py
+  python scripts/export_harvest_features.py --years 2020 2021 2022 2023 2024 2025 2026  # list every year: the combined CSV holds only listed years
+  python scripts/build_field_yield_table.py
+  python scripts/predict_season_field.py --score  # writes score_2026.{csv,md} beside the bundle; refuses a second run
+  ```
 - [ ] Optionally add June/August indices or more years (Landsat before 2019) to the regional set; get municipality-level yields or nearby farms for a closer season source.
 - [x] Prefer fewer features: three peak-season indices beat 49 indices for field deviations on every crop.
 - [x] Require a chosen model to beat the baseline by a margin on development years (`--min-improvement`). Backtests that treat 2023 and 2024 as the final year, each using only earlier years: with no margin, mean skill over 12 crop-tests was −0.76 (peas 2024 −8.70); with a 10% margin −0.06, and pooled bu/ac error fell to 88.9% of the baseline's (98.5% with no margin, 93.1% with 20%). Use `--min-improvement 0.1` for the 2026 holdout. Models won in 2023 (canola +0.48, barley +0.41, wheat +0.22) and lost in 2024, matching the season-level pattern above.
@@ -109,9 +121,9 @@ point: models help in unusual years and can hurt in typical ones.
 
 ## 6. Save an inference-ready model and document scope
 
-- [ ] Save the fitted preprocessing/model bundle, ordered feature schema, crop/unit mapping, training years, feature cutoff and software versions.
-- [ ] Add inference for new field features without requiring the actual harvest yield.
-- [ ] Check feature/schema mismatch behavior and reload-to-prediction consistency.
+- [x] Save the fitted preprocessing/model bundle, ordered feature schema, crop/unit mapping, training years, feature cutoff and software versions (2026-10-28, `season_field_bundle.py`: `model.joblib` plus `manifest.json` with input and model SHA-256s).
+- [x] Add inference for new field features without requiring the actual harvest yield (`scripts/predict_season_field.py`). It needs all of a crop's fields for a season together. Features for a season before harvest would need a field/crop list that does not come from the harvest workbook.
+- [x] Check feature/schema mismatch behavior and reload-to-prediction consistency (`tests/test_season_field_bundle.py`). The bundle reproduces the evaluation's held-out 2025 predictions exactly.
 - [ ] Record exclusions and limits: data from one farm/report source do not establish province-wide accuracy.
 
 **Completion evidence:** a saved model can predict a held-out field/season from valid inputs alone, with its target unit and applicability visible.

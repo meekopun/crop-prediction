@@ -217,6 +217,13 @@ imply that integration is done.
   field deviation, barley +0.65, wheat +0.36, canola +0.35 skill.
 - `holdout_field_yield.py --min-improvement 0.1` keeps the baseline unless a
   model beats it by 10% on development years; backtests on 2023/2024 favour 10%.
+- 2026 holdout is locked (2026-10-28): `scripts/fit_season_field_bundle.py`
+  (`season_field_bundle.py`) saved `regional_satellite` + `peak` with the 10%
+  margin, fitted on 2020–2025, to `data/processed/harvest/models/season_field_2026/`.
+  Do not refit it once 2026 yields exist; score with
+  `scripts/predict_season_field.py --score` (runs once). A 2025 look at the same
+  configuration failed (pooled skill −0.69): July 2025 indices were low across all
+  Alberta regions while yields were normal, so region-years share season errors.
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 
