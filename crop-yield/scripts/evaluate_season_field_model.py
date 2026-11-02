@@ -20,10 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from yield_prediction.field_yield import DEFAULT_TABLE_PATH
 from yield_prediction.regional_yields import DEFAULT_ALBERTA_YIELDS_PATH, DEFAULT_REGIONAL_PATH
+from yield_prediction.regional_features import DEFAULT_LOCAL_FEATURES_PATH
 from yield_prediction.season_field_model import (
     DEFAULT_OUTPUT_DIR, DEV_YEARS, DEVIATION_FEATURE_SETS, REGIONAL_SEASON_MONTHS, SEASON_FEATURE_SETS,
-    VARIANTS, evaluate_regional_season_models, evaluate_season_field_model, load_region_table,
-    regional_feature_paths,
+    SEASON_READINGS, VARIANTS, evaluate_regional_season_models, evaluate_season_field_model, load_local_table,
+    load_region_table, regional_feature_paths,
 )
 
 
@@ -48,19 +49,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--regional-features", type=Path, nargs="+",
                         help="Regional crop-masked feature files, one per month, for regional_satellite "
                              "options; default: the option's month files.")
+    parser.add_argument("--season-reading", choices=SEASON_READINGS, default="fields",
+                        help="Farm season features for regional_satellite options: mean over fields, over "
+                             "their whole quarters, or over a fixed area around the farm.")
+    parser.add_argument("--local-features", type=Path, default=DEFAULT_LOCAL_FEATURES_PATH,
+                        help="export_local_features.py output for --season-reading local.")
     return parser
 
 
 def build_summary(metrics: pd.DataFrame, seasons: pd.DataFrame, years: list[int],
                   deviation_features: str, season_features: str,
-                  regional_check: pd.DataFrame | None = None) -> str:
+                  regional_check: pd.DataFrame | None = None, season_reading: str = "fields") -> str:
     lines = [f"# Season + Field Yield Model ({min(years)}-{max(years)}, leave one season out)", "",
              f"Field deviation: `{deviation_features}` features "
              f"({len(DEVIATION_FEATURE_SETS[deviation_features])} columns, centred on the crop-season mean). "
              + (f"Season level: published regional yield x the crop's training farm-to-region ratio."
               if season_features == "regional" else
               f"Season level: `{season_features}` features "
-              f"({', '.join(f'`{column}`' for column in SEASON_FEATURE_SETS[season_features])})."), "",
+              f"({', '.join(f'`{column}`' for column in SEASON_FEATURE_SETS[season_features])}), "
+              f"farm reading `{season_reading}`."), "",
              "Mean absolute error per crop in its unit; `skill` is the share of the baseline's error",
              "removed. `known_season` variants use the crop's other fields' actual season mean, a",
              "stand-in for published regional yields: a ceiling, not an achievable forecast here.", "",
@@ -103,28 +110,32 @@ def build_summary(metrics: pd.DataFrame, seasons: pd.DataFrame, years: list[int]
 
 def main() -> int:
     args = build_parser().parse_args()
-    region_table = regional_check = None
+    region_table = regional_check = local_table = None
     try:
         if args.season_features in REGIONAL_SEASON_MONTHS:
             region_table = load_region_table(args.regional_yields,
                                              args.regional_features or regional_feature_paths(args.season_features))
-            regional_check = evaluate_regional_season_models(region_table, SEASON_FEATURE_SETS[args.season_features])
+            regional_check = evaluate_regional_season_models(region_table, args.season_features)
+        if args.season_reading == "local":
+            local_table = load_local_table(args.local_features)
         artifact = evaluate_season_field_model(args.input, years=tuple(args.years), min_rows=args.min_rows,
                                                deviation_features=args.deviation_features,
                                                season_features=args.season_features,
-                                               regional_path=args.regional, region_table=region_table)
+                                               regional_path=args.regional, region_table=region_table,
+                                               season_reading=args.season_reading, local_table=local_table)
     except (OSError, KeyError, ValueError) as exc:
         print(f"Season + field evaluation failed: {exc}", file=sys.stderr)
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    prefix = f"season_field_{args.season_features}_{args.deviation_features}"
+    reading = "" if args.season_reading == "fields" else f"_{args.season_reading}"
+    prefix = f"season_field_{args.season_features}{reading}_{args.deviation_features}"
     artifact.metrics.to_csv(args.output_dir / f"{prefix}_metrics.csv", index=False)
     artifact.seasons.to_csv(args.output_dir / f"{prefix}_seasons.csv", index=False)
     artifact.predictions.to_csv(args.output_dir / f"{prefix}_predictions.csv", index=False)
     if regional_check is not None:
         regional_check.to_csv(args.output_dir / f"{prefix}_regional_check.csv", index=False)
     summary = build_summary(artifact.metrics, artifact.seasons, args.years,
-                            args.deviation_features, args.season_features, regional_check)
+                            args.deviation_features, args.season_features, regional_check, args.season_reading)
     (args.output_dir / f"{prefix}_summary.md").write_text(summary + "\n", encoding="utf-8")
     print(summary)
     print(f"Wrote {prefix}_* outputs to {args.output_dir.resolve()}")

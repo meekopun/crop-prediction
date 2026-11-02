@@ -4,7 +4,8 @@ Pilot-eligible operations of the same crop and year that touch a common quarter
 section are one field-year: their yield is total production / total harvested
 area, and their quarters' features are combined. ``field_<band>_<mon>`` uses the
 crop-inventory-masked mean when enough of the land is labelled as the reported
-crop, otherwise the whole-quarter mean.
+crop, otherwise the whole-quarter mean; ``quarter_<band>_<mon>`` is always the
+whole-quarter mean.
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ def table_columns(include_weather: bool = False) -> list[str]:
     for month in MONTHS.values():
         columns.append(f"s2_valid_{month}")
         columns.extend(f"field_{band}_{month}" for band in FEATURE_BANDS)
+    for month in MONTHS.values():
+        columns.extend(f"quarter_{band}_{month}" for band in FEATURE_BANDS)
     if include_weather:
         columns.extend(weather_columns() + SEASON_WEATHER_COLUMNS)
     return columns
@@ -163,6 +166,7 @@ def build_field_yield_table(matches_path: Path | str = DEFAULT_MATCHES_PATH,
                     [(_number(row[f"crop_{band}_{month}"]), weight) for row, weight in zip(quarters, crop_weights)])
                 # A month without crop-pixel data falls back to the whole quarter.
                 out[f"field_{band}_{month}"] = crop_value if use_crop_mask and crop_value is not None else quarter_value
+                out[f"quarter_{band}_{month}"] = quarter_value
         if weather is not None:
             records = [(weather.get((pid, first["year"])), acres[pid]) for pid in pids]
             for column in weather_columns():
@@ -193,7 +197,8 @@ def build_field_yield_table(matches_path: Path | str = DEFAULT_MATCHES_PATH,
         "notes": [
             "yield = total production / total harvested area over the grouped operations.",
             "field_* uses crop-mask means when aci_crop_fraction >= crop_mask_min_fraction, "
-            "else whole-quarter means; months without crop pixels fall back to the quarter.",
+            "else whole-quarter means; months without crop pixels fall back to the quarter. "
+            "quarter_* is always the whole-quarter mean.",
             "Units are kept as reported; never pool bu/ac and lb/ac crops.",
         ],
     }

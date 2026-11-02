@@ -230,6 +230,10 @@ imply that integration is done.
 - `export_regional_features.py --month jun|aug` adds per-month regional files;
   `regional_satellite_jun_jul`, `_jul_aug`, `_jun_jul_aug` season options did not
   beat July alone on season error (2026-11-02); July+August helps only canola.
+- Challenger tests (2026-11-02, pre-declared 5% bar on pooled MAE): field history
+  (`peak_history`), `--season-reading quarter|local` (`export_local_features.py`)
+  and `regional_satellite_canola_jul_aug` (best, −3.8%) all fell short; nothing
+  was locked. The field table also carries whole-quarter `quarter_*` columns.
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 

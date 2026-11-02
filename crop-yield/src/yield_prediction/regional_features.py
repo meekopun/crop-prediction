@@ -12,6 +12,10 @@ Each month has its own file so finished months are kept; July, the original
 export, keeps the unsuffixed name. Regions are unions of census divisions (FAO
 GAUL 2015 level 2); Sentinel-2 SR is sparse over Alberta before 2019, so years
 start there.
+
+The same reduction over a fixed rectangle around the farm (``LOCAL_AREA_BBOX``,
+30 m) gives a local season reading that does not depend on which fields the
+farm grew a crop on, or on whether the crop map recognises them.
 """
 
 from __future__ import annotations
@@ -22,7 +26,12 @@ from pathlib import Path
 from .regional_yields import ALBERTA_REGION_DIVISIONS, PACKAGE_ROOT
 
 DEFAULT_REGIONAL_FEATURES_PATH = PACKAGE_ROOT / "data/processed/regional/alberta_regional_features.csv"
+DEFAULT_LOCAL_FEATURES_PATH = PACKAGE_ROOT / "data/processed/harvest/satellite/local_area_features.csv"
 DEFAULT_REGION_YEARS = tuple(range(2019, 2026))
+# The Beaverlodge quarters' extent (2020-2025) plus about 10 km; fixed so every year covers the same land.
+LOCAL_AREA_BBOX = (-119.64, 54.98, -119.04, 55.36)
+LOCAL_SCALE_M = 30
+LOCAL_MONTHS = ("jul", "aug")
 # Inventory class -> harvest crop name; undifferentiated wheat (140) counts as spring.
 CROP_CLASSES = {133: "barley", 136: "oats", 140: "wheat", 146: "wheat", 153: "canola", 162: "field_peas"}
 MONTHS = {"jun": 6, "jul": 7, "aug": 8}
@@ -55,10 +64,17 @@ def extract_region_year(region: str, year: int, *, month: str = "jul", scale: in
     """Return one row per crop with its crop-masked means for one region-year and month."""
     import ee
 
-    features = month_features(month)
     divisions = [_division_name(number) for number in ALBERTA_REGION_DIVISIONS[region]]
     geometry = (ee.FeatureCollection("FAO/GAUL/2015/level2").filter(ee.Filter.eq("ADM1_NAME", "Alberta"))
                 .filter(ee.Filter.inList("ADM2_NAME", divisions)).geometry())
+    return [{"region": region, "year": year, **row} for row in _crop_masked_means(geometry, year, month, scale)]
+
+
+def _crop_masked_means(geometry, year: int, month: str, scale: int) -> list[dict]:
+    """One row per crop inside ``geometry``: pixel count and the month's crop-masked index means."""
+    import ee
+
+    features = month_features(month)
     aci = (ee.ImageCollection("AAFC/ACI").filter(ee.Filter.calendarRange(year, year, "year"))
            .first().select("landcover"))
     codes = list(CROP_CLASSES)
@@ -86,9 +102,58 @@ def extract_region_year(region: str, year: int, *, month: str = "jul", scale: in
                .group(groupField=4, groupName="landcover"))
     groups = stack.reduceRegion(reducer, geometry, scale=scale, maxPixels=1e10, tileScale=4).getInfo()["groups"]
     names = {146: "wheat", **{code: crop for code, crop in CROP_CLASSES.items() if code != 140}}
-    return [{"region": region, "year": year, "crop": names[int(group["landcover"])], "pixels": group["count"],
-             **dict(zip(features, group["mean"]))}
+    return [{"crop": names[int(group["landcover"])], "pixels": group["count"], **dict(zip(features, group["mean"]))}
             for group in groups if int(group["landcover"]) in names]
+
+
+def extract_local_year(year: int, *, months: tuple[str, ...] = LOCAL_MONTHS,
+                       bbox: tuple[float, ...] = LOCAL_AREA_BBOX, scale: int = LOCAL_SCALE_M) -> list[dict]:
+    """One row per crop with crop-masked means for every month over the fixed area around the farm."""
+    import ee
+
+    geometry = ee.Geometry.Rectangle(list(bbox))
+    rows: dict[str, dict] = {}
+    for month in months:
+        for row in _crop_masked_means(geometry, year, month, scale):
+            entry = rows.setdefault(row["crop"], {"year": year, "crop": row["crop"]})
+            entry[f"pixels_{month}"] = row["pixels"]
+            entry.update({key: value for key, value in row.items() if key.startswith("field_")})
+    return list(rows.values())
+
+
+def export_local_features(output_path: Path | str = DEFAULT_LOCAL_FEATURES_PATH, *,
+                          years: tuple[int, ...] = DEFAULT_REGION_YEARS, months: tuple[str, ...] = LOCAL_MONTHS,
+                          project: str | None = None, overwrite: bool = False,
+                          scale: int = LOCAL_SCALE_M, progress=print) -> list[dict]:
+    """Export the local area year by year, appending as it goes so an interrupted run resumes."""
+    import ee
+
+    columns = (["year", "crop"] + [f"pixels_{month}" for month in months]
+               + [column for month in months for column in month_features(month)])
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    if destination.exists() and not overwrite:
+        with destination.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames != columns:
+                raise ValueError(f"{destination} has other columns; pass overwrite to start again.")
+            rows = list(reader)
+    ee.Initialize(project=project)
+    if overwrite or not destination.exists():
+        with destination.open("w", encoding="utf-8", newline="") as handle:
+            csv.DictWriter(handle, fieldnames=columns).writeheader()
+        rows = []
+    done = {int(row["year"]) for row in rows}
+    for year in years:
+        if year in done:
+            continue
+        new_rows = extract_local_year(year, months=months, scale=scale)
+        with destination.open("a", encoding="utf-8", newline="") as handle:
+            csv.DictWriter(handle, fieldnames=columns, restval="").writerows(new_rows)
+        rows.extend(new_rows)
+        progress(f"local area {year}: {len(new_rows)} crops")
+    return rows
 
 
 def export_regional_features(output_path: Path | str | None = None, *, month: str = "jul",
