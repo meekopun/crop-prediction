@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export crop-masked monthly Sentinel-2 means for every Alberta small-area region and year.
+"""Export crop-masked monthly Sentinel-2 or Landsat means for every Alberta small-area region and year.
 
 Requires `earthengine-api` and a saved Earth Engine login. Each region-year is a
 single ~20 s request at 250 m; finished region-years are kept on rerun. Each
@@ -17,17 +17,20 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from yield_prediction.regional_features import (
-    DEFAULT_REGION_YEARS, MONTHS, SCALE_M, export_regional_features, regional_features_path,
+    MONTHS, SCALE_M, SENSOR_INDICES, export_regional_features, regional_features_path,
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--month", choices=list(MONTHS), default="jul", help="Composite month.")
+    parser.add_argument("--sensor", choices=list(SENSOR_INDICES), default="s2",
+                        help="Sentinel-2 (NDVI/NDRE/EVI, 2019 on) or Landsat 8/9 (NDVI/EVI, 2013 on).")
     parser.add_argument("--output", type=Path,
-                        help="Region-crop-year feature CSV (appended as it runs); default depends on --month.")
-    parser.add_argument("--years", type=int, nargs="+", default=list(DEFAULT_REGION_YEARS),
-                        help="Years to export.")
+                        help="Region-crop-year feature CSV (appended as it runs); default depends on "
+                             "--month and --sensor.")
+    parser.add_argument("--years", type=int, nargs="+",
+                        help="Years to export (default: 2019-2025 for s2, 2013-2025 for landsat).")
     parser.add_argument("--project", help="Earth Engine Cloud project; defaults to the saved one.")
     parser.add_argument("--scale", type=int, default=SCALE_M, help="Reduction scale in metres.")
     parser.add_argument("--overwrite", action="store_true", help="Start a fresh file instead of resuming.")
@@ -41,11 +44,11 @@ def main() -> int:
     except ImportError:
         print("Regional export requires earthengine-api: pip install earthengine-api", file=sys.stderr)
         return 1
-    output = args.output or regional_features_path(args.month)
+    output = args.output or regional_features_path(args.month, args.sensor)
     try:
-        rows = export_regional_features(output, month=args.month, years=tuple(args.years), project=args.project,
-                                        overwrite=args.overwrite, scale=args.scale,
-                                        progress=lambda message: print(message, flush=True))
+        rows = export_regional_features(output, month=args.month, years=tuple(args.years) if args.years else None,
+                                        project=args.project, overwrite=args.overwrite, scale=args.scale,
+                                        sensor=args.sensor, progress=lambda message: print(message, flush=True))
     except (OSError, ValueError, KeyError, ee.EEException) as exc:
         print(f"Regional export failed (rerun to resume): {exc}", file=sys.stderr)
         return 1

@@ -13,7 +13,9 @@ on the training seasons; crops without published yields keep the training mean.
 The ``regional_satellite`` option learns the satellite-to-season-yield relation
 from all Alberta region-years (excluding the held-out season) and applies it to
 the farm's own July satellite anomaly; ``regional_satellite_<months>`` options
-add the June and/or August composites (``_canola_jul_aug``: canola only). The
+add the June and/or August composites (``_canola_jul_aug``: canola only), and
+``regional_landsat`` learns from Landsat NDVI/EVI region-years back to 2013 (the
+farm's Sentinel-2 anomalies are rescaled by a cross-sensor slope). The
 farm's season reading is the mean over its fields (``fields``), over their whole
 quarters (``quarter``) or over a fixed area around the farm (``local``). The
 ``peak_history`` deviation set adds each field's mean departure from its
@@ -34,7 +36,7 @@ from .regional_features import (
     DEFAULT_LOCAL_FEATURES_PATH, DEFAULT_REGIONAL_FEATURES_PATH, MONTHS, REGIONAL_FEATURES, month_features,
     regional_features_path,
 )
-from .regional_yields import DEFAULT_ALBERTA_YIELDS_PATH, DEFAULT_REGIONAL_PATH
+from .regional_yields import ALBERTA_YIELDS_2013_PATH, DEFAULT_ALBERTA_YIELDS_PATH, DEFAULT_REGIONAL_PATH
 
 DEV_YEARS = (2020, 2021, 2022, 2023, 2024)
 PEAK_FEATURES = ["field_NDVI_jul", "field_NDRE_jul", "field_EVI_jul"]
@@ -47,7 +49,12 @@ REGIONAL_SEASON_MONTHS = {"regional_satellite": {"*": ("jul",)},
                           "regional_satellite_jun_jul": {"*": ("jun", "jul")},
                           "regional_satellite_jul_aug": {"*": ("jul", "aug")},
                           "regional_satellite_jun_jul_aug": {"*": ("jun", "jul", "aug")},
-                          "regional_satellite_canola_jul_aug": {"*": ("jul",), "canola": ("jul", "aug")}}
+                          "regional_satellite_canola_jul_aug": {"*": ("jul",), "canola": ("jul", "aug")},
+                          "regional_landsat": {"*": ("jul",)}}
+# Sensor behind each option's regional features (Sentinel-2 unless listed).
+REGIONAL_SEASON_SENSORS = {"regional_landsat": "landsat"}
+# Landsat region-crop-years with less clear coverage than this share of the region-crop's median are dropped.
+LANDSAT_MIN_PIXEL_SHARE = 0.25
 SEASON_READINGS = ("fields", "quarter", "local")
 
 
@@ -56,17 +63,23 @@ def _option_months(option: str) -> list[str]:
     return [month for month in MONTHS if month in used]
 
 
+def _option_sensor(option: str) -> str:
+    return REGIONAL_SEASON_SENSORS.get(option, "s2")
+
+
 def season_crop_features(option: str, crop: str) -> list[str]:
     """Season-level feature columns a regional_satellite option uses for one crop."""
     months = REGIONAL_SEASON_MONTHS[option]
-    return [column for month in months.get(crop, months["*"]) for column in month_features(month)]
+    return [column for month in months.get(crop, months["*"])
+            for column in month_features(month, _option_sensor(option))]
 
 
 # "regional" uses published yields from a separate file rather than table columns;
 # regional_satellite options train on region-years but apply to the farm's features.
 SEASON_FEATURE_SETS = {"weather": ["w_precip_may_aug", "w_gdd5_may_aug", "w_tmax_jul"],
                        "satellite": PEAK_FEATURES, "regional": [],
-                       **{name: [column for month in _option_months(name) for column in month_features(month)]
+                       **{name: [column for month in _option_months(name)
+                                 for column in month_features(month, _option_sensor(name))]
                           for name in REGIONAL_SEASON_MONTHS}}
 assert REGIONAL_FEATURES == PEAK_FEATURES == SEASON_FEATURE_SETS["regional_satellite"], \
     "regional and farm features must share names"
@@ -253,7 +266,53 @@ def _regional_season_means(season_train, crops, year, regional, crop_means):
 
 def regional_feature_paths(season_features: str) -> list[Path]:
     """Default per-month regional feature files for a regional_satellite option."""
-    return [regional_features_path(month) for month in _option_months(season_features)]
+    sensor = _option_sensor(season_features)
+    return [regional_features_path(month, sensor) for month in _option_months(season_features)]
+
+
+def regional_yields_path(season_features: str) -> Path:
+    """Default regional yields for a regional_satellite option (from 2013 for Landsat)."""
+    return ALBERTA_YIELDS_2013_PATH if _option_sensor(season_features) == "landsat" else DEFAULT_ALBERTA_YIELDS_PATH
+
+
+def _drop_low_coverage(frame, min_pixel_share: float):
+    """Drop rows whose pixel count is below ``min_pixel_share`` of their region-crop's median."""
+    median = frame.groupby(["region", "crop"])["pixels"].transform("median")
+    return frame[frame["pixels"] >= min_pixel_share * median]
+
+
+def load_option_region_table(season_features: str, yields_path: Path | str | None = None,
+                             features_paths: list | None = None):
+    """The region table a regional_satellite option trains on, with its default files and coverage rule."""
+    table = load_region_table(yields_path or regional_yields_path(season_features),
+                              features_paths or regional_feature_paths(season_features))
+    if _option_sensor(season_features) == "landsat":
+        table = _drop_low_coverage(table, LANDSAT_MIN_PIXEL_SHARE).reset_index(drop=True)
+    return table
+
+
+def cross_sensor_scale(landsat_path: Path | str | None = None,
+                       s2_path: Path | str = DEFAULT_REGIONAL_FEATURES_PATH) -> dict[str, float]:
+    """Per-index slope of Landsat on Sentinel-2 July regional anomalies over shared region-crop-years.
+
+    Farm features are Sentinel-2; scaling their anomalies by this slope puts them
+    on the Landsat scale the regional model learned. Anomalies are against each
+    region-crop's mean over the shared years. Uses features only, never yields.
+    """
+    import pandas as pd
+
+    landsat = _drop_low_coverage(pd.read_csv(landsat_path or regional_features_path("jul", "landsat")),
+                                 LANDSAT_MIN_PIXEL_SHARE)
+    columns = month_features("jul", "landsat")
+    shared =landsat.merge(pd.read_csv(s2_path), on=["region", "year", "crop"], suffixes=("_landsat", "_s2"))
+    scale = {}
+    for column in columns:
+        pair = shared[["region", "crop", f"{column}_landsat", f"{column}_s2"]].dropna()
+        values = pair[[f"{column}_landsat", f"{column}_s2"]]
+        centred = values - values.groupby([pair["region"], pair["crop"]]).transform("mean")
+        x, y = centred[f"{column}_s2"], centred[f"{column}_landsat"]
+        scale[column] = float((x * y).sum() / (x * x).sum())
+    return scale
 
 
 def load_region_table(yields_path: Path | str = DEFAULT_ALBERTA_YIELDS_PATH,
@@ -342,16 +401,17 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
                                 season_features: str = "weather",
                                 regional_path: Path | str = DEFAULT_REGIONAL_PATH,
                                 region_table=None, season_reading: str = "fields",
-                                local_table=None) -> SeasonFieldArtifact:
+                                local_table=None, sensor_scale: dict | None = None) -> SeasonFieldArtifact:
     """Leave one season out over ``years``; score every variant per crop.
 
     ``deviation_features`` names a set in DEVIATION_FEATURE_SETS and
     ``season_features`` one in SEASON_FEATURE_SETS; ``regional`` reads
     ``regional_path`` (from scripts/prepare_regional_yields.py) and
-    ``regional_satellite`` options use ``region_table`` (default: the option's month
-    files via ``load_region_table``). ``season_reading`` (regional_satellite only)
+    ``regional_satellite`` options use ``region_table`` (default:
+    ``load_option_region_table``). ``season_reading`` (regional_satellite only)
     picks the farm's season features; ``local`` uses ``local_table`` (default:
-    ``load_local_table()``).
+    ``load_local_table()``). ``sensor_scale`` multiplies the farm's season
+    features per column (default: ``cross_sensor_scale()`` for Landsat options).
     """
     import numpy as np
     import pandas as pd
@@ -365,7 +425,9 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
         raise ValueError(f"Season reading {season_reading!r} needs a regional_satellite option; "
                          f"readings are {SEASON_READINGS}.")
     if regional_satellite and region_table is None:
-        region_table = load_region_table(features_path=regional_feature_paths(season_features))
+        region_table = load_option_region_table(season_features)
+    if regional_satellite and sensor_scale is None and _option_sensor(season_features) == "landsat":
+        sensor_scale = cross_sensor_scale()
     if season_reading == "local" and local_table is None:
         local_table = load_local_table()
     table = pd.read_csv(table_path, dtype={"field_key": str, "section_key": str, "pids": str})
@@ -384,6 +446,9 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
     table = pd.concat([table, _centre(table, satellite_columns).set_axis(
         [f"centred_{column}" for column in satellite_columns], axis=1)], axis=1)
     readings = _season_reading(table, season_reading, season_columns, local_table) if regional_satellite else None
+    if readings is not None and sensor_scale:
+        # Anomalies are differences, so scaling the readings scales the anomalies.
+        readings = readings * pd.Series({column: sensor_scale.get(column, 1.0) for column in readings.columns})
 
     prediction_frames, season_rows = [], []
     for held_out in sorted(table["year"].unique()):

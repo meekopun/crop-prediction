@@ -21,6 +21,8 @@ from .harvest import PACKAGE_ROOT
 DEFAULT_STATCAN_ZIP = PACKAGE_ROOT / "data/raw/statcan/32100002-eng.zip"
 DEFAULT_REGIONAL_PATH = PACKAGE_ROOT / "data/processed/regional/regional_yields.csv"
 DEFAULT_ALBERTA_YIELDS_PATH = PACKAGE_ROOT / "data/processed/regional/alberta_regional_yields.csv"
+# --all-alberta --first-year 2013, for the Landsat-era season model.
+ALBERTA_YIELDS_2013_PATH = PACKAGE_ROOT / "data/processed/regional/alberta_regional_yields_2013.csv"
 DEFAULT_REGION = "Small Area Data Region 70 - Alberta"
 # Alberta small-area regions follow Census Agricultural Regions; each is a set of
 # census divisions (Statistics Canada CAR/CD maps, 1996, 2001 and 2021).

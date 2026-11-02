@@ -115,7 +115,8 @@ class RegionalSeasonModelTests(unittest.TestCase):
             path = farm_table(directory, generator)
             table = pd.read_csv(path)
             fields = [column for column in table.columns if column.startswith("field_") and column != "field_key"]
-            table = table.assign(**{column.replace("field_", "quarter_", 1): table[column] for column in fields})
+            table = pd.concat([table, table[fields].rename(columns=lambda column: column.replace("field_", "quarter_", 1))],
+                              axis=1)
             table.to_csv(path, index=False)
             local = table.groupby(["crop", "year"])[fields].mean().reset_index()
             runs = {reading: evaluate_season_field_model(path, deviation_features="peak",
@@ -143,6 +144,36 @@ class RegionalSeasonModelTests(unittest.TestCase):
         self.assertEqual(list(_field_history(source, target, own_year_out=False).round(6)), [0.1, 0.0, 0.0])
         self.assertEqual({key: round(value, 6) for key, value in field_history_means(source).items()},
                          {"A": 0.1, "B": -0.1})
+
+    def test_landsat_option_uses_ndvi_evi_and_rescales_farm_anomalies(self):
+        import pandas as pd
+        from yield_prediction.season_field_model import (
+            SEASON_FEATURE_SETS, _drop_low_coverage, cross_sensor_scale, evaluate_season_field_model,
+        )
+
+        self.assertEqual(SEASON_FEATURE_SETS["regional_landsat"], ["field_NDVI_jul", "field_EVI_jul"])
+        generator = random.Random(11)
+        regions = region_table(generator).assign(pixels=1000)
+        regions.loc[0, "pixels"] = 100
+        self.assertEqual(len(_drop_low_coverage(regions, 0.25)), len(regions) - 1)
+        with tempfile.TemporaryDirectory() as directory:
+            s2_path, landsat_path = Path(directory) / "s2.csv", Path(directory) / "landsat.csv"
+            regions.to_csv(s2_path, index=False)
+            landsat = regions.assign(field_NDVI_jul=0.1 + 0.8 * regions["field_NDVI_jul"],
+                                     field_EVI_jul=-0.05 + 0.9 * regions["field_EVI_jul"])
+            landsat.loc[0, "pixels"] = 1000
+            landsat.drop(columns="field_NDRE_jul").to_csv(landsat_path, index=False)
+            scale = cross_sensor_scale(landsat_path, s2_path)
+            self.assertAlmostEqual(scale["field_NDVI_jul"], 0.8)
+            self.assertAlmostEqual(scale["field_EVI_jul"], 0.9)
+            farm = farm_table(directory, generator)
+            # A Landsat-scale regional table plus the slope must match the Sentinel-2 fit on raw anomalies.
+            on_landsat = evaluate_season_field_model(farm, deviation_features="peak", season_features="regional_landsat",
+                                                     region_table=landsat, sensor_scale=scale).seasons
+            on_s2 = evaluate_season_field_model(farm, deviation_features="peak", season_features="regional_landsat",
+                                                region_table=regions, sensor_scale={}).seasons
+        difference = on_landsat["predicted_relative"] - on_s2["predicted_relative"]
+        self.assertLess(difference.abs().max(), 1e-6)
 
     def test_the_held_out_season_never_trains_the_regional_model(self):
         from yield_prediction.season_field_model import REGIONAL_FEATURES, fit_regional_season_models

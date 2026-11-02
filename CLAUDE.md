@@ -234,6 +234,10 @@ imply that integration is done.
   (`peak_history`), `--season-reading quarter|local` (`export_local_features.py`)
   and `regional_satellite_canola_jul_aug` (best, −3.8%) all fell short; nothing
   was locked. The field table also carries whole-quarter `quarter_*` columns.
+- `export_regional_features.py --sensor landsat` (Landsat 8/9 NDVI/EVI, 2013–2025)
+  and `alberta_regional_yields_2013.csv` feed `regional_landsat`; farm Sentinel-2
+  anomalies are rescaled by `cross_sensor_scale()`. 13 regional seasons gave
+  −4.1% pooled MAE (2026-11-02), below the 5% bar; not locked.
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 
