@@ -62,6 +62,34 @@ class RegionalSeasonModelTests(unittest.TestCase):
         self.assertTrue(artifact.seasons["predicted_relative"].notna().all())
         self.assertEqual(set(artifact.predictions["year"]), {2020, 2021, 2022, 2023, 2024})
 
+    def test_month_files_merge_into_a_multi_month_season_model(self):
+        from yield_prediction.season_field_model import (
+            SEASON_FEATURE_SETS, evaluate_regional_season_models, evaluate_season_field_model, load_region_table,
+        )
+
+        generator = random.Random(8)
+        regions = region_table(generator)
+        july = ["field_NDVI_jul", "field_NDRE_jul", "field_EVI_jul"]
+        august = [column.replace("_jul", "_aug") for column in july]
+        for source, target in zip(july, august):
+            regions[target] = regions[source] - 0.1 + [generator.gauss(0, 0.005) for _ in range(len(regions))]
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("yields.csv", "jul.csv", "aug.csv")]
+            regions[["region", "year", "crop", "regional_yield"]].to_csv(paths[0], index=False)
+            for path, columns in zip(paths[1:], (july, august)):
+                regions[["region", "year", "crop"] + columns].assign(pixels=100).to_csv(path, index=False)
+            loaded = load_region_table(paths[0], paths[1:])
+            self.assertEqual(len(loaded), len(regions))
+            self.assertEqual(list(loaded.columns).count("pixels"), 1)
+            features = SEASON_FEATURE_SETS["regional_satellite_jul_aug"]
+            self.assertEqual(features, july + august)
+            check = evaluate_regional_season_models(loaded, features).set_index("crop")
+            self.assertTrue((check["skill"] > 0.8).all())
+            artifact = evaluate_season_field_model(farm_table(directory, generator), deviation_features="peak",
+                                                   season_features="regional_satellite_jul_aug",
+                                                   region_table=loaded)
+        self.assertTrue(artifact.seasons["predicted_relative"].notna().all())
+
     def test_the_held_out_season_never_trains_the_regional_model(self):
         from yield_prediction.season_field_model import REGIONAL_FEATURES, fit_regional_season_models
 

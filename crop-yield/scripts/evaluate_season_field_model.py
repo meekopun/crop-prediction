@@ -19,11 +19,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from yield_prediction.field_yield import DEFAULT_TABLE_PATH
-from yield_prediction.regional_features import DEFAULT_REGIONAL_FEATURES_PATH
 from yield_prediction.regional_yields import DEFAULT_ALBERTA_YIELDS_PATH, DEFAULT_REGIONAL_PATH
 from yield_prediction.season_field_model import (
-    DEFAULT_OUTPUT_DIR, DEV_YEARS, DEVIATION_FEATURE_SETS, SEASON_FEATURE_SETS, VARIANTS,
-    evaluate_regional_season_models, evaluate_season_field_model, load_region_table,
+    DEFAULT_OUTPUT_DIR, DEV_YEARS, DEVIATION_FEATURE_SETS, REGIONAL_SEASON_MONTHS, SEASON_FEATURE_SETS,
+    VARIANTS, evaluate_regional_season_models, evaluate_season_field_model, load_region_table,
+    regional_feature_paths,
 )
 
 
@@ -39,13 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Satellite features for the field-deviation model.")
     parser.add_argument("--season-features", choices=sorted(SEASON_FEATURE_SETS), default="weather",
                         help="Season level: ERA5-Land weather, season-mean peak satellite indices, "
-                             "or published regional yields.")
+                             "published regional yields, or a satellite model trained on Alberta regions "
+                             "(July, optionally with June and/or August).")
     parser.add_argument("--regional", type=Path, default=DEFAULT_REGIONAL_PATH,
                         help="regional_yields.csv for --season-features regional.")
     parser.add_argument("--regional-yields", type=Path, default=DEFAULT_ALBERTA_YIELDS_PATH,
-                        help="All-Alberta regional yields for --season-features regional_satellite.")
-    parser.add_argument("--regional-features", type=Path, default=DEFAULT_REGIONAL_FEATURES_PATH,
-                        help="Regional crop-masked features for --season-features regional_satellite.")
+                        help="All-Alberta regional yields for regional_satellite options.")
+    parser.add_argument("--regional-features", type=Path, nargs="+",
+                        help="Regional crop-masked feature files, one per month, for regional_satellite "
+                             "options; default: the option's month files.")
     return parser
 
 
@@ -103,9 +105,10 @@ def main() -> int:
     args = build_parser().parse_args()
     region_table = regional_check = None
     try:
-        if args.season_features == "regional_satellite":
-            region_table = load_region_table(args.regional_yields, args.regional_features)
-            regional_check = evaluate_regional_season_models(region_table)
+        if args.season_features in REGIONAL_SEASON_MONTHS:
+            region_table = load_region_table(args.regional_yields,
+                                             args.regional_features or regional_feature_paths(args.season_features))
+            regional_check = evaluate_regional_season_models(region_table, SEASON_FEATURE_SETS[args.season_features])
         artifact = evaluate_season_field_model(args.input, years=tuple(args.years), min_rows=args.min_rows,
                                                deviation_features=args.deviation_features,
                                                season_features=args.season_features,

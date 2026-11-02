@@ -12,7 +12,8 @@ instead scales the published regional yield by the farm-to-region ratio learned
 on the training seasons; crops without published yields keep the training mean.
 The ``regional_satellite`` option learns the satellite-to-season-yield relation
 from all Alberta region-years (excluding the held-out season) and applies it to
-the farm's own satellite anomaly.
+the farm's own July satellite anomaly; ``regional_satellite_<months>`` options
+add the June and/or August composites.
 
 Evaluation holds out one season at a time and uses development years only
 (2020-2024 by default); later years are dropped before anything is fitted.
@@ -25,18 +26,26 @@ from pathlib import Path
 
 from .field_benchmark import DEFAULT_BENCHMARK_DIR, FEATURE_SETS
 from .field_yield import DEFAULT_TABLE_PATH
-from .regional_features import DEFAULT_REGIONAL_FEATURES_PATH, REGIONAL_FEATURES
+from .regional_features import (
+    DEFAULT_REGIONAL_FEATURES_PATH, REGIONAL_FEATURES, month_features, regional_features_path,
+)
 from .regional_yields import DEFAULT_ALBERTA_YIELDS_PATH, DEFAULT_REGIONAL_PATH
 
 DEV_YEARS = (2020, 2021, 2022, 2023, 2024)
 PEAK_FEATURES = ["field_NDVI_jul", "field_NDRE_jul", "field_EVI_jul"]
 DEVIATION_FEATURE_SETS = {"indices": FEATURE_SETS["indices"], "peak": PEAK_FEATURES}
+# Months of regional and farm composites behind each regional_satellite option.
+REGIONAL_SEASON_MONTHS = {"regional_satellite": ("jul",), "regional_satellite_jun_jul": ("jun", "jul"),
+                          "regional_satellite_jul_aug": ("jul", "aug"),
+                          "regional_satellite_jun_jul_aug": ("jun", "jul", "aug")}
 # "regional" uses published yields from a separate file rather than table columns;
-# "regional_satellite" trains on region-years but applies to the farm's peak features.
+# regional_satellite options train on region-years but apply to the farm's features.
 SEASON_FEATURE_SETS = {"weather": ["w_precip_may_aug", "w_gdd5_may_aug", "w_tmax_jul"],
                        "satellite": PEAK_FEATURES, "regional": [],
-                       "regional_satellite": PEAK_FEATURES}
-assert REGIONAL_FEATURES == PEAK_FEATURES, "regional and farm features must share names"
+                       **{name: [column for month in months for column in month_features(month)]
+                          for name, months in REGIONAL_SEASON_MONTHS.items()}}
+assert REGIONAL_FEATURES == PEAK_FEATURES == SEASON_FEATURE_SETS["regional_satellite"], \
+    "regional and farm features must share names"
 SEASON_ALPHAS = (0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0)
 DEFAULT_OUTPUT_DIR = DEFAULT_BENCHMARK_DIR
 VARIANTS = {
@@ -98,10 +107,11 @@ def _predict_deviation(models, test, centred):
 def _regional_satellite_relative(models, reference, season_features) -> dict:
     """Relative season yield per crop from the farm's anomaly against its training seasons.
 
-    ``season_features`` is indexed by crop. Crops without a regional model or with a
-    missing feature are left out, so callers fall back to the training mean.
+    ``season_features`` is indexed by crop and ``reference``'s columns name the
+    model's features. Crops without a regional model or with a missing feature are
+    left out, so callers fall back to the training mean.
     """
-    anomaly = season_features[REGIONAL_FEATURES] - reference.reindex(season_features.index)
+    anomaly = season_features[reference.columns] - reference.reindex(season_features.index)
     relative = {}
     for crop in season_features.index:
         if crop in models and anomaly.loc[crop].notna().all():
@@ -161,44 +171,58 @@ def _regional_season_means(season_train, crops, year, regional, crop_means):
     return pd.Series(means, dtype=float), ratios
 
 
+def regional_feature_paths(season_features: str) -> list[Path]:
+    """Default per-month regional feature files for a regional_satellite option."""
+    return [regional_features_path(month) for month in REGIONAL_SEASON_MONTHS[season_features]]
+
+
 def load_region_table(yields_path: Path | str = DEFAULT_ALBERTA_YIELDS_PATH,
-                      features_path: Path | str = DEFAULT_REGIONAL_FEATURES_PATH):
-    """Join regional yields with regional crop-masked features by region, crop and year."""
+                      features_path: Path | str | list = DEFAULT_REGIONAL_FEATURES_PATH):
+    """Join regional yields with regional crop-masked features by region, crop and year.
+
+    ``features_path`` is one file or a list of per-month files; each adds its columns.
+    """
     import pandas as pd
 
-    for path, script in ((yields_path, "prepare_regional_yields.py --all-alberta"),
-                         (features_path, "export_regional_features.py")):
+    paths = [features_path] if isinstance(features_path, (str, Path)) else list(features_path)
+    for path, script in [(yields_path, "prepare_regional_yields.py --all-alberta")] + [
+            (path, "export_regional_features.py") for path in paths]:
         if not Path(path).exists():
             raise ValueError(f"{path} not found; run scripts/{script} first.")
-    yields = pd.read_csv(yields_path)[["region", "year", "crop", "regional_yield"]]
-    features = pd.read_csv(features_path)
-    return yields.merge(features, on=["region", "year", "crop"], how="inner").dropna(
-        subset=["regional_yield"] + REGIONAL_FEATURES)
+    table = pd.read_csv(yields_path)[["region", "year", "crop", "regional_yield"]]
+    for index, path in enumerate(paths):
+        features = pd.read_csv(path)
+        # Pixel counts differ by month; keep the first file's.
+        table = table.merge(features if index == 0 else features.drop(columns="pixels", errors="ignore"),
+                            on=["region", "year", "crop"], how="inner")
+    feature_columns = [column for column in table.columns if column.startswith("field_")]
+    return table.dropna(subset=["regional_yield"] + feature_columns)
 
 
-def _region_anomalies(rows, reference_rows):
+def _region_anomalies(rows, reference_rows, features=REGIONAL_FEATURES):
     """Relative yield and feature anomalies against each region-crop's reference years."""
-    reference = reference_rows.groupby(["region", "crop"])[["regional_yield"] + REGIONAL_FEATURES].mean()
+    reference = reference_rows.groupby(["region", "crop"])[["regional_yield"] + list(features)].mean()
     keyed = rows.join(reference, on=["region", "crop"], rsuffix="_reference")
     out = rows[["region", "crop", "year"]].copy()
     out["relative_mean"] = keyed["regional_yield"] / keyed["regional_yield_reference"]
-    for column in REGIONAL_FEATURES:
+    for column in features:
         out[column] = keyed[column] - keyed[f"{column}_reference"]
     return out.dropna()
 
 
-def fit_regional_season_models(region_table, exclude_year: int | None = None) -> dict:
+def fit_regional_season_models(region_table, exclude_year: int | None = None,
+                               features=REGIONAL_FEATURES) -> dict:
     """Per-crop ridge from satellite anomalies to relative season yield, over region-years."""
     training = region_table[region_table["year"] != exclude_year]
-    anomalies = _region_anomalies(training, training)
+    anomalies = _region_anomalies(training, training, features)
     models = {}
     for crop, frame in anomalies.groupby("crop"):
         if frame["year"].nunique() >= 3:
-            models[crop] = _fit_season_model(frame, REGIONAL_FEATURES)
+            models[crop] = _fit_season_model(frame, list(features))
     return models
 
 
-def evaluate_regional_season_models(region_table):
+def evaluate_regional_season_models(region_table, features=REGIONAL_FEATURES):
     """Leave one year out across all region-years: does the satellite anomaly predict season yield?"""
     import numpy as np
     import pandas as pd
@@ -208,11 +232,11 @@ def evaluate_regional_season_models(region_table):
         errors, baseline_errors = [], []
         for year in sorted(frame["year"].unique()):
             training, test = frame[frame["year"] != year], frame[frame["year"] == year]
-            models = fit_regional_season_models(training)
+            models = fit_regional_season_models(training, features=features)
             if crop not in models:
                 continue
-            anomalies = _region_anomalies(test, training)
-            predicted = models[crop][0].predict(anomalies[REGIONAL_FEATURES])
+            anomalies = _region_anomalies(test, training, features)
+            predicted = models[crop][0].predict(anomalies[list(features)])
             errors.extend(np.abs(predicted - anomalies["relative_mean"]))
             baseline_errors.extend(np.abs(1 - anomalies["relative_mean"]))
         if errors:
@@ -233,7 +257,8 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
     ``deviation_features`` names a set in DEVIATION_FEATURE_SETS and
     ``season_features`` one in SEASON_FEATURE_SETS; ``regional`` reads
     ``regional_path`` (from scripts/prepare_regional_yields.py) and
-    ``regional_satellite`` uses ``region_table`` (default: ``load_region_table()``).
+    ``regional_satellite`` options use ``region_table`` (default: the option's month
+    files via ``load_region_table``).
     """
     import numpy as np
     import pandas as pd
@@ -241,8 +266,9 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
     deviation_columns = DEVIATION_FEATURE_SETS[deviation_features]
     season_columns = SEASON_FEATURE_SETS[season_features]
     regional = _load_regional(regional_path) if season_features == "regional" else None
-    if season_features == "regional_satellite" and region_table is None:
-        region_table = load_region_table()
+    regional_satellite = season_features in REGIONAL_SEASON_MONTHS
+    if regional_satellite and region_table is None:
+        region_table = load_region_table(features_path=regional_feature_paths(season_features))
     table = pd.read_csv(table_path, dtype={"field_key": str, "section_key": str, "pids": str})
     missing = [column for column in season_columns + deviation_columns if column not in table.columns]
     if missing:
@@ -271,9 +297,9 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
             modelled_mean, ratios = _regional_season_means(season_train, season_test.index, held_out,
                                                            regional, crop_means)
             alpha = float("nan")
-        elif season_features == "regional_satellite":
+        elif regional_satellite:
             # The held-out season is excluded from the regional training years too.
-            models = fit_regional_season_models(region_table, exclude_year=held_out)
+            models = fit_regional_season_models(region_table, exclude_year=held_out, features=season_columns)
             reference = season_train.groupby("crop")[season_columns].mean()
             ratios = _regional_satellite_relative(models, reference, season_test)
             modelled_mean = crop_means.reindex(season_test.index).copy()
@@ -316,8 +342,7 @@ def evaluate_season_field_model(table_path: Path | str = DEFAULT_TABLE_PATH, *,
                                 **{column: row[column] for column in season_columns},
                                 **({"regional_yield": regional.get((crop, held_out)),
                                     "farm_to_region_ratio": ratios.get(crop)} if regional is not None else {}),
-                                **({"predicted_relative": ratios.get(crop)}
-                                   if season_features == "regional_satellite" else {})})
+                                **({"predicted_relative": ratios.get(crop)} if regional_satellite else {})})
 
     predictions = pd.concat(prediction_frames, ignore_index=True)
     metric_rows = []

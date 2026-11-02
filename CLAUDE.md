@@ -221,9 +221,15 @@ imply that integration is done.
   (`season_field_bundle.py`) saved `regional_satellite` + `peak` with the 10%
   margin, fitted on 2020–2025, to `data/processed/harvest/models/season_field_2026/`.
   Do not refit it once 2026 yields exist; score with
-  `scripts/predict_season_field.py --score` (runs once). A 2025 look at the same
-  configuration failed (pooled skill −0.69): July 2025 indices were low across all
-  Alberta regions while yields were normal, so region-years share season errors.
+  `scripts/predict_season_field.py --score` (runs once) under Anaconda `python3`
+  (scikit-learn 1.5.1, as in `manifest.json`); the `.venv`'s scikit-learn 1.9.1
+  cannot unpickle it. A 2025 look at the same configuration failed (pooled skill
+  −0.69): July greenness understated 2025 yields (Alberta +14–29% on normal July
+  indices; the farm's July NDVI 0.05–0.16 low against yields 0–27% low), so
+  region-years share season errors.
+- `export_regional_features.py --month jun|aug` adds per-month regional files;
+  `regional_satellite_jun_jul`, `_jul_aug`, `_jun_jul_aug` season options did not
+  beat July alone on season error (2026-11-02); July+August helps only canola.
 - `row_id = quarter_section + crop + year` is the join key across the yield
   preprocessing and modeling steps.
 

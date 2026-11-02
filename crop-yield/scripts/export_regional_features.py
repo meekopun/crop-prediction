@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Export crop-masked July Sentinel-2 means for every Alberta small-area region and year.
+"""Export crop-masked monthly Sentinel-2 means for every Alberta small-area region and year.
 
 Requires `earthengine-api` and a saved Earth Engine login. Each region-year is a
-single ~20 s request at 250 m; finished region-years are kept on rerun.
+single ~20 s request at 250 m; finished region-years are kept on rerun. Each
+month goes to its own file (July: alberta_regional_features.csv; others add a
+_<month> suffix).
 """
 
 from __future__ import annotations
@@ -15,14 +17,15 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from yield_prediction.regional_features import (
-    DEFAULT_REGION_YEARS, DEFAULT_REGIONAL_FEATURES_PATH, SCALE_M, export_regional_features,
+    DEFAULT_REGION_YEARS, MONTHS, SCALE_M, export_regional_features, regional_features_path,
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=DEFAULT_REGIONAL_FEATURES_PATH,
-                        help="Region-crop-year feature CSV (appended as it runs).")
+    parser.add_argument("--month", choices=list(MONTHS), default="jul", help="Composite month.")
+    parser.add_argument("--output", type=Path,
+                        help="Region-crop-year feature CSV (appended as it runs); default depends on --month.")
     parser.add_argument("--years", type=int, nargs="+", default=list(DEFAULT_REGION_YEARS),
                         help="Years to export.")
     parser.add_argument("--project", help="Earth Engine Cloud project; defaults to the saved one.")
@@ -38,14 +41,15 @@ def main() -> int:
     except ImportError:
         print("Regional export requires earthengine-api: pip install earthengine-api", file=sys.stderr)
         return 1
+    output = args.output or regional_features_path(args.month)
     try:
-        rows = export_regional_features(args.output, years=tuple(args.years), project=args.project,
+        rows = export_regional_features(output, month=args.month, years=tuple(args.years), project=args.project,
                                         overwrite=args.overwrite, scale=args.scale,
                                         progress=lambda message: print(message, flush=True))
     except (OSError, ValueError, KeyError, ee.EEException) as exc:
         print(f"Regional export failed (rerun to resume): {exc}", file=sys.stderr)
         return 1
-    print(f"{len(rows)} region-crop-years in {args.output.resolve()}")
+    print(f"{len(rows)} region-crop-years in {output.resolve()}")
     return 0
 
 
